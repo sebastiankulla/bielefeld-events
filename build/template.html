@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bielefeld Events – Veranstaltungen in Bielefeld</title>
+    <meta name="description" content="Alle Veranstaltungen in Bielefeld auf einen Blick. Konzerte, Kultur, Sport und mehr.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg">
+        <div class="container mx-auto px-4 py-6">
+            <h1 class="text-3xl font-bold tracking-tight">Bielefeld Events</h1>
+            <p class="mt-1 text-indigo-100">Veranstaltungen in und um Bielefeld</p>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-4 py-8 flex-1"
+          x-data="eventApp()"
+          x-init="init()"
+          x-cloak>
+
+        <!-- Filters -->
+        <div class="bg-white rounded-xl shadow-sm p-6 mb-8">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+
+                <!-- Date picker -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Datum ab</label>
+                    <input type="date"
+                           x-model="filters.dateFrom"
+                           class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Datum bis</label>
+                    <input type="date"
+                           x-model="filters.dateTo"
+                           class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+
+                <!-- Category filter -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Kategorie</label>
+                    <select x-model="filters.category"
+                            class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        <option value="">Alle Kategorien</option>
+<!-- CATEGORY_OPTIONS -->
+                    </select>
+                </div>
+
+                <!-- Location filter -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Ort</label>
+                    <select x-model="filters.location"
+                            class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        <option value="">Alle Orte</option>
+<!-- LOCATION_OPTIONS -->
+                    </select>
+                </div>
+            </div>
+
+            <!-- Search + Reset -->
+            <div class="mt-4 flex flex-col sm:flex-row gap-3">
+                <div class="flex-1">
+                    <input type="text"
+                           x-model="filters.search"
+                           placeholder="Suche nach Events..."
+                           class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <button @click="resetFilters()"
+                        class="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition">
+                    Filter zurücksetzen
+                </button>
+            </div>
+        </div>
+
+        <!-- Results count -->
+        <p class="text-sm text-gray-500 mb-4">
+            <span x-text="filteredEvents.length"></span> Veranstaltungen gefunden
+        </p>
+
+        <!-- Loading state -->
+        <template x-if="loading">
+            <div class="text-center py-12">
+                <div class="inline-block w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                <p class="mt-3 text-gray-500">Events werden geladen...</p>
+            </div>
+        </template>
+
+        <!-- Empty state -->
+        <template x-if="!loading && filteredEvents.length === 0">
+            <div class="text-center py-12 bg-white rounded-xl shadow-sm">
+                <p class="text-gray-400 text-lg">Keine Veranstaltungen gefunden.</p>
+                <p class="text-gray-400 text-sm mt-1">Versuche andere Filtereinstellungen.</p>
+            </div>
+        </template>
+
+        <!-- Event Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <template x-for="event in filteredEvents" :key="event.id">
+                <article class="bg-white rounded-xl shadow-sm hover:shadow-md transition overflow-hidden flex flex-col">
+                    <!-- Event Image -->
+                    <template x-if="event.image_url">
+                        <img :src="event.image_url"
+                             :alt="event.title"
+                             class="w-full h-48 object-cover"
+                             loading="lazy"
+                             onerror="this.style.display='none'">
+                    </template>
+                    <template x-if="!event.image_url">
+                        <div class="w-full h-48 bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
+                            <span class="text-4xl text-indigo-300">&#128197;</span>
+                        </div>
+                    </template>
+
+                    <div class="p-5 flex flex-col flex-1">
+                        <!-- Category badge -->
+                        <template x-if="event.category">
+                            <span class="inline-block self-start px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 mb-2"
+                                  x-text="event.category"></span>
+                        </template>
+
+                        <!-- Title -->
+                        <h3 class="font-semibold text-gray-900 text-lg leading-snug mb-2">
+                            <a :href="event.url" target="_blank" rel="noopener"
+                               class="hover:text-indigo-600 transition"
+                               x-text="event.title"></a>
+                        </h3>
+
+                        <!-- Date -->
+                        <p class="text-sm text-gray-500 mb-1">
+                            <span class="mr-1">&#128197;</span>
+                            <span x-text="formatDate(event.date_start)"></span>
+                        </p>
+
+                        <!-- Location -->
+                        <template x-if="event.location">
+                            <p class="text-sm text-gray-500 mb-3">
+                                <span class="mr-1">&#128205;</span>
+                                <span x-text="event.location"></span>
+                            </p>
+                        </template>
+
+                        <!-- Description -->
+                        <p class="text-sm text-gray-600 line-clamp-3 flex-1"
+                           x-text="event.description"></p>
+
+                        <!-- Footer -->
+                        <div class="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
+                            <span class="text-xs text-gray-400" x-text="'Quelle: ' + event.source"></span>
+                            <template x-if="event.price">
+                                <span class="text-xs font-medium text-green-600" x-text="event.price"></span>
+                            </template>
+                        </div>
+                    </div>
+                </article>
+            </template>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t mt-12">
+        <div class="container mx-auto px-4 py-6 text-center text-sm text-gray-400">
+            <p>&copy; 2026 Bielefeld Events &middot; Daten werden täglich aktualisiert</p>
+        </div>
+    </footer>
+
+    <script>
+        function eventApp() {
+            return {
+                events: [],
+                loading: true,
+                filters: {
+                    dateFrom: '',
+                    dateTo: '',
+                    category: '',
+                    location: '',
+                    search: '',
+                },
+
+                async init() {
+                    try {
+                        const resp = await fetch('events.json');
+                        this.events = await resp.json();
+                    } catch (e) {
+                        console.error('Failed to load events:', e);
+                        this.events = [];
+                    }
+                    this.loading = false;
+                },
+
+                get filteredEvents() {
+                    return this.events.filter(ev => {
+                        if (this.filters.dateFrom && ev.date_start < this.filters.dateFrom) return false;
+                        if (this.filters.dateTo && ev.date_start > this.filters.dateTo + 'T23:59:59') return false;
+                        if (this.filters.category && ev.category !== this.filters.category) return false;
+                        if (this.filters.location && ev.location !== this.filters.location) return false;
+                        if (this.filters.search) {
+                            const q = this.filters.search.toLowerCase();
+                            const haystack = (ev.title + ' ' + ev.description + ' ' + ev.location).toLowerCase();
+                            if (!haystack.includes(q)) return false;
+                        }
+                        return true;
+                    });
+                },
+
+                resetFilters() {
+                    this.filters = { dateFrom: '', dateTo: '', category: '', location: '', search: '' };
+                },
+
+                formatDate(iso) {
+                    if (!iso) return '';
+                    const d = new Date(iso);
+                    return d.toLocaleDateString('de-DE', {
+                        weekday: 'short',
+                        day: '2-digit',
+                        month: 'long',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                    });
+                },
+            };
+        }
+    </script>
+</body>
+</html>
