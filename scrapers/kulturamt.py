@@ -74,11 +74,8 @@ class KulturamtScraper(BaseScraper):
         )
         description = desc_el.get_text(strip=True) if desc_el else ""
 
-        loc_el = card.select_one(
-            ".ort, .location, .venue, "
-            "[class*='location'], [class*='ort'], [class*='venue']"
-        )
-        location = loc_el.get_text(strip=True) if loc_el else ""
+        # Location - use the robust multi-strategy extraction
+        location = self._extract_location_from_card(card)
 
         img_el = card.select_one("img[src]")
         image_url = ""
@@ -122,8 +119,9 @@ class KulturamtScraper(BaseScraper):
                                 source=self.name,
                                 url=item.get("url", ""),
                                 description=item.get("description", ""),
-                                location=item.get("location", {}).get("name", "")
-                                if isinstance(item.get("location"), dict) else "",
+                                location=self._parse_jsonld_location(
+                                    item.get("location")
+                                ),
                                 category="Kultur",
                                 image_url=item.get("image", ""),
                             ))

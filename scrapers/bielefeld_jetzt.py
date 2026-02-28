@@ -105,12 +105,8 @@ class BielefeldJetztScraper(BaseScraper):
         )
         description = desc_el.get_text(strip=True) if desc_el else ""
 
-        # Location
-        loc_el = card.select_one(
-            ".location, .venue, .ort, .event-location, "
-            "[class*='location'], [class*='venue'], [class*='ort']"
-        )
-        location = loc_el.get_text(strip=True) if loc_el else ""
+        # Location - use the robust multi-strategy extraction
+        location = self._extract_location_from_card(card)
 
         # Image
         img_el = card.select_one("img[src]")

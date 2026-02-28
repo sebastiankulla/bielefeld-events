@@ -1,9 +1,12 @@
 """SQLite database layer for storing scraped events."""
 
+import logging
 import sqlite3
 from pathlib import Path
 
 from scrapers.base import Event
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "events.db"
 
@@ -82,6 +85,7 @@ def upsert_events(events: list[Event]) -> int:
             )
             count += 1
         except sqlite3.Error:
+            logger.warning("Failed to upsert event: %s", event.title, exc_info=True)
             continue
     conn.commit()
     conn.close()

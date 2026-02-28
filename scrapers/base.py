@@ -187,3 +187,91 @@ class BaseScraper(ABC):
         if url.startswith("/"):
             return self.base_url + url
         return self.base_url + "/" + url
+
+    def _extract_location_from_card(self, card) -> str:
+        """Extract location from an HTML card using multiple strategies."""
+        # Strategy 1: CSS selectors for common location elements
+        loc_selectors = [
+            ".location", ".venue", ".ort", ".veranstaltungsort",
+            ".event-location", ".event-venue", ".event-ort",
+            "[class*='location']", "[class*='venue']", "[class*='ort']",
+            "[itemprop='location']",
+        ]
+        for selector in loc_selectors:
+            el = card.select_one(selector)
+            if el:
+                text = el.get_text(strip=True)
+                if text and len(text) >= 3:
+                    return text
+
+        # Strategy 2: <address> tag
+        addr_el = card.select_one("address")
+        if addr_el:
+            text = addr_el.get_text(strip=True)
+            if text and len(text) >= 3:
+                return text
+
+        # Strategy 3: Look for "Ort:" / "Veranstaltungsort:" / "Wo:" patterns in text
+        card_text = card.get_text(separator="\n")
+        location = _extract_location_from_text(card_text)
+        if location:
+            return location
+
+        return ""
+
+    @staticmethod
+    def _parse_jsonld_location(location_data) -> str:
+        """Extract a location name from JSON-LD location data (handles all formats)."""
+        if not location_data:
+            return ""
+
+        # Simple string
+        if isinstance(location_data, str):
+            return location_data.strip()
+
+        # Object with name (Place, VirtualLocation, etc.)
+        if isinstance(location_data, dict):
+            name = location_data.get("name", "")
+            address = location_data.get("address", "")
+
+            # Resolve address to a string
+            if isinstance(address, dict):
+                parts = []
+                venue = address.get("name", "")
+                if venue:
+                    parts.append(venue)
+                street = address.get("streetAddress", "")
+                if street:
+                    parts.append(street)
+                locality = address.get("addressLocality", "")
+                if locality:
+                    parts.append(locality)
+                address = ", ".join(parts)
+
+            if name and address:
+                return f"{name}, {address}"
+            return name or address or ""
+
+        # Array of locations - take the first
+        if isinstance(location_data, list) and location_data:
+            return BaseScraper._parse_jsonld_location(location_data[0])
+
+        return ""
+
+
+# Pattern for extracting location from text like "Ort: Stadthalle Bielefeld"
+RE_LOCATION_LABEL = re.compile(
+    r"(?:Ort|Veranstaltungsort|Location|Venue|Wo|Spielort|Spielstätte)"
+    r"\s*[:]\s*(.+?)(?:\n|$)",
+    re.IGNORECASE,
+)
+
+
+def _extract_location_from_text(text: str) -> str:
+    """Try to extract a location from text using label patterns."""
+    m = RE_LOCATION_LABEL.search(text)
+    if m:
+        loc = m.group(1).strip().rstrip(",;.")
+        if len(loc) >= 3:
+            return loc
+    return ""
