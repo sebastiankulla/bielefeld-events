@@ -2,8 +2,9 @@ name: Update Events & Deploy
 
 on:
   schedule:
-    # Täglich um 6:00 UTC (7:00 bzw. 8:00 Uhr MEZ/MESZ)
+    # Täglich um 6:00 und 18:00 UTC
     - cron: '0 6 * * *'
+    - cron: '0 18 * * *'
   workflow_dispatch: # Manueller Trigger
 
 permissions:
@@ -34,6 +35,7 @@ jobs:
 
       - name: Run scrapers
         run: python scrape.py
+        continue-on-error: true
 
       - name: Generate static site
         run: python build/generate.py
