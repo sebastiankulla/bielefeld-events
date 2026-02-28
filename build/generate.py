@@ -10,7 +10,7 @@ from pathlib import Path
 # Allow imports from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scrapers.database import get_all_events, get_categories, get_locations, init_db
+from scrapers.database import get_all_events, init_db
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,28 +33,11 @@ def build_json() -> list[dict]:
     return events
 
 
-def build_html(events: list[dict]) -> None:
-    """Generate index.html from template."""
-    categories = get_categories()
-    locations = get_locations()
-
+def build_html() -> None:
+    """Copy template as index.html (filters are now dynamic via Alpine.js)."""
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
-
-    # Inject filter options into template
-    category_options = "\n".join(
-        f'                            <option value="{c}">{c}</option>'
-        for c in categories
-    )
-    location_options = "\n".join(
-        f'                            <option value="{loc}">{loc}</option>'
-        for loc in locations
-    )
-
-    html = template.replace("<!-- CATEGORY_OPTIONS -->", category_options)
-    html = html.replace("<!-- LOCATION_OPTIONS -->", location_options)
-
     output_path = SITE_DIR / "index.html"
-    output_path.write_text(html, encoding="utf-8")
+    output_path.write_text(template, encoding="utf-8")
     logger.info("Written index.html to %s", output_path)
 
 
@@ -62,15 +45,17 @@ def main() -> int:
     init_db()
     SITE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Copy static assets
-    assets_src = PROJECT_ROOT / "site" / "assets"
-    if assets_src.exists():
-        logger.info("Static assets directory exists at %s", assets_src)
-
     events = build_json()
-    build_html(events)
+    build_html()
 
-    logger.info("Site generation complete. Output in %s", SITE_DIR)
+    # Summary
+    categories = set(e.get("category", "") for e in events if e.get("category"))
+    sources = set(e.get("source", "") for e in events)
+    logger.info(
+        "Site generation complete: %d events, %d categories, %d sources",
+        len(events), len(categories), len(sources),
+    )
+    logger.info("Output in %s", SITE_DIR)
     return 0
 
 

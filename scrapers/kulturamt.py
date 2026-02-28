@@ -1,20 +1,22 @@
-"""Scraper for OWL Journal event listings."""
+"""Scraper for Kulturamt Bielefeld event listings."""
 
 from bs4 import BeautifulSoup
 
 from scrapers.base import BaseScraper, Event, parse_german_date
 
 
-class OwlJournalScraper(BaseScraper):
-    """Scrapes events from OWL Journal (regional news portal)."""
+class KulturamtScraper(BaseScraper):
+    """Scrapes events from the Kulturamt Bielefeld website."""
 
-    name = "owl_journal"
-    base_url = "https://www.owl-journal.de"
+    name = "kulturamt"
+    base_url = "https://kulturamt-bielefeld.de"
 
     def scrape(self) -> list[Event]:
         events = []
         try:
-            html = self._get_page(f"{self.base_url}/veranstaltungen/bielefeld/")
+            html = self._get_page(
+                f"{self.base_url}/kultur-erleben/veranstaltungskalender/"
+            )
             soup = BeautifulSoup(html, "lxml")
             events = self._extract_events(soup)
             self.logger.info("Scraped %d events from %s", len(events), self.name)
@@ -26,9 +28,10 @@ class OwlJournalScraper(BaseScraper):
         events = []
 
         containers = soup.select(
-            "article, .event-item, .veranstaltung, "
-            "[class*='event'], [class*='veranstaltung'], "
-            ".entry, .post, .card, .list-item"
+            "article, .event-item, .event-card, .event, "
+            ".veranstaltung, .termin, [class*='event'], "
+            "[class*='veranstaltung'], [class*='termin'], "
+            ".card, .entry, .list-item, .teaser"
         )
 
         for card in containers:
@@ -44,8 +47,8 @@ class OwlJournalScraper(BaseScraper):
 
     def _parse_card(self, card) -> Event | None:
         title_el = card.select_one(
-            "h2, h3, h4, .entry-title, .title, "
-            "[class*='title'], a[href]"
+            "h2, h3, h4, .title, .titel, "
+            "[class*='title'], [class*='titel'], a[href]"
         )
         if not title_el:
             return None
@@ -57,8 +60,7 @@ class OwlJournalScraper(BaseScraper):
         url = self._absolute_url(link_el["href"]) if link_el else ""
 
         date_el = card.select_one(
-            "time, .event-date, .date, .datum, "
-            "[class*='date'], [class*='datum']"
+            "time, .datum, .date, [class*='date'], [class*='datum']"
         )
         date_start = self._parse_date_element(date_el)
         if not date_start:
@@ -67,14 +69,14 @@ class OwlJournalScraper(BaseScraper):
             return None
 
         desc_el = card.select_one(
-            "p, .entry-summary, .excerpt, .description, "
-            "[class*='desc'], [class*='excerpt']"
+            "p, .beschreibung, .text, .description, "
+            "[class*='desc'], [class*='text']"
         )
         description = desc_el.get_text(strip=True) if desc_el else ""
 
         loc_el = card.select_one(
-            ".event-location, .location, .ort, "
-            "[class*='location'], [class*='ort']"
+            ".ort, .location, .venue, "
+            "[class*='location'], [class*='ort'], [class*='venue']"
         )
         location = loc_el.get_text(strip=True) if loc_el else ""
 
@@ -85,6 +87,11 @@ class OwlJournalScraper(BaseScraper):
                 img_el.get("data-src", "") or img_el.get("src", "")
             )
 
+        cat_el = card.select_one(
+            ".kategorie, .category, [class*='category'], [class*='kategorie']"
+        )
+        category = cat_el.get_text(strip=True) if cat_el else "Kultur"
+
         return Event(
             title=title,
             date_start=date_start,
@@ -92,6 +99,7 @@ class OwlJournalScraper(BaseScraper):
             url=url,
             description=description,
             location=location,
+            category=category,
             image_url=image_url,
         )
 
@@ -116,6 +124,7 @@ class OwlJournalScraper(BaseScraper):
                                 description=item.get("description", ""),
                                 location=item.get("location", {}).get("name", "")
                                 if isinstance(item.get("location"), dict) else "",
+                                category="Kultur",
                                 image_url=item.get("image", ""),
                             ))
             except (json.JSONDecodeError, TypeError, AttributeError):

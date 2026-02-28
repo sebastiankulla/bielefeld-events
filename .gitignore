@@ -18,5 +18,6 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Build artifacts
+# Build artifacts (rebuilt on each run)
 site/events.json
+site/index.html

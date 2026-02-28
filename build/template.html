@@ -5,19 +5,43 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bielefeld Events – Veranstaltungen in Bielefeld</title>
     <meta name="description" content="Alle Veranstaltungen in Bielefeld auf einen Blick. Konzerte, Kultur, Sport und mehr.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#127915;</text></svg>">
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
         [x-cloak] { display: none !important; }
+        .line-clamp-3 {
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen flex flex-col">
 
     <!-- Header -->
     <header class="bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg">
-        <div class="container mx-auto px-4 py-6">
-            <h1 class="text-3xl font-bold tracking-tight">Bielefeld Events</h1>
-            <p class="mt-1 text-indigo-100">Veranstaltungen in und um Bielefeld</p>
+        <div class="container mx-auto px-4 py-8">
+            <h1 class="text-3xl md:text-4xl font-bold tracking-tight">Bielefeld Events</h1>
+            <p class="mt-2 text-indigo-100 text-lg">Veranstaltungen in und um Bielefeld</p>
         </div>
     </header>
 
@@ -29,15 +53,17 @@
 
         <!-- Filters -->
         <div class="bg-white rounded-xl shadow-sm p-6 mb-8">
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
 
-                <!-- Date picker -->
+                <!-- Date from -->
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Datum ab</label>
                     <input type="date"
                            x-model="filters.dateFrom"
                            class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
                 </div>
+
+                <!-- Date to -->
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Datum bis</label>
                     <input type="date"
@@ -45,58 +71,105 @@
                            class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
                 </div>
 
-                <!-- Category filter -->
+                <!-- Category filter (dynamically populated) -->
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Kategorie</label>
                     <select x-model="filters.category"
                             class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
                         <option value="">Alle Kategorien</option>
-<!-- CATEGORY_OPTIONS -->
+                        <template x-for="cat in categories" :key="cat">
+                            <option :value="cat" x-text="cat"></option>
+                        </template>
                     </select>
                 </div>
 
-                <!-- Location filter -->
+                <!-- Location filter (dynamically populated) -->
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Ort</label>
                     <select x-model="filters.location"
                             class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
                         <option value="">Alle Orte</option>
-<!-- LOCATION_OPTIONS -->
+                        <template x-for="loc in locations" :key="loc">
+                            <option :value="loc" x-text="loc"></option>
+                        </template>
+                    </select>
+                </div>
+
+                <!-- Source filter (dynamically populated) -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Quelle</label>
+                    <select x-model="filters.source"
+                            class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        <option value="">Alle Quellen</option>
+                        <template x-for="src in sources" :key="src">
+                            <option :value="src" x-text="sourceLabel(src)"></option>
+                        </template>
                     </select>
                 </div>
             </div>
 
             <!-- Search + Reset -->
             <div class="mt-4 flex flex-col sm:flex-row gap-3">
-                <div class="flex-1">
+                <div class="flex-1 relative">
+                    <span class="absolute inset-y-0 left-3 flex items-center text-gray-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                    </span>
                     <input type="text"
                            x-model="filters.search"
-                           placeholder="Suche nach Events..."
-                           class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                           placeholder="Suche nach Events, Orten, Beschreibungen..."
+                           class="w-full rounded-lg border-gray-300 border pl-10 pr-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
                 </div>
                 <button @click="resetFilters()"
-                        class="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition">
+                        class="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
                     Filter zurücksetzen
                 </button>
             </div>
         </div>
 
         <!-- Results count -->
-        <p class="text-sm text-gray-500 mb-4">
-            <span x-text="filteredEvents.length"></span> Veranstaltungen gefunden
-        </p>
+        <div class="flex items-center justify-between mb-4">
+            <p class="text-sm text-gray-500">
+                <span x-text="filteredEvents.length"></span> Veranstaltungen gefunden
+            </p>
+            <p class="text-sm text-gray-400" x-show="lastUpdated" x-text="'Stand: ' + lastUpdated"></p>
+        </div>
 
         <!-- Loading state -->
         <template x-if="loading">
-            <div class="text-center py-12">
-                <div class="inline-block w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-                <p class="mt-3 text-gray-500">Events werden geladen...</p>
+            <div class="text-center py-16">
+                <div class="inline-block w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                <p class="mt-4 text-gray-500">Events werden geladen...</p>
+            </div>
+        </template>
+
+        <!-- Error state -->
+        <template x-if="error">
+            <div class="text-center py-16 bg-white rounded-xl shadow-sm">
+                <svg class="w-12 h-12 mx-auto text-red-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                </svg>
+                <p class="text-gray-500 text-lg">Events konnten nicht geladen werden.</p>
+                <button @click="init()" class="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm">
+                    Erneut versuchen
+                </button>
             </div>
         </template>
 
         <!-- Empty state -->
-        <template x-if="!loading && filteredEvents.length === 0">
-            <div class="text-center py-12 bg-white rounded-xl shadow-sm">
+        <template x-if="!loading && !error && filteredEvents.length === 0">
+            <div class="text-center py-16 bg-white rounded-xl shadow-sm">
+                <svg class="w-12 h-12 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
                 <p class="text-gray-400 text-lg">Keine Veranstaltungen gefunden.</p>
                 <p class="text-gray-400 text-sm mt-1">Versuche andere Filtereinstellungen.</p>
             </div>
@@ -104,71 +177,97 @@
 
         <!-- Event Grid -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            <template x-for="event in filteredEvents" :key="event.id">
-                <article class="bg-white rounded-xl shadow-sm hover:shadow-md transition overflow-hidden flex flex-col">
+            <template x-for="event in filteredEvents" :key="event.id || (event.title + event.date_start)">
+                <article class="bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden flex flex-col group">
                     <!-- Event Image -->
-                    <template x-if="event.image_url">
-                        <img :src="event.image_url"
-                             :alt="event.title"
-                             class="w-full h-48 object-cover"
-                             loading="lazy"
-                             onerror="this.style.display='none'">
-                    </template>
-                    <template x-if="!event.image_url">
-                        <div class="w-full h-48 bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
-                            <span class="text-4xl text-indigo-300">&#128197;</span>
-                        </div>
-                    </template>
-
-                    <div class="p-5 flex flex-col flex-1">
-                        <!-- Category badge -->
-                        <template x-if="event.category">
-                            <span class="inline-block self-start px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 mb-2"
-                                  x-text="event.category"></span>
+                    <div class="relative">
+                        <template x-if="event.image_url">
+                            <img :src="event.image_url"
+                                 :alt="event.title"
+                                 class="w-full h-48 object-cover"
+                                 loading="lazy"
+                                 onerror="this.parentElement.innerHTML='<div class=\'w-full h-48 bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center\'><svg class=\'w-12 h-12 text-indigo-300\' fill=\'none\' stroke=\'currentColor\' viewBox=\'0 0 24 24\'><path stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z\'/></svg></div>'">
+                        </template>
+                        <template x-if="!event.image_url">
+                            <div class="w-full h-48 bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
+                                <svg class="w-12 h-12 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                                </svg>
+                            </div>
                         </template>
 
+                        <!-- Category badge -->
+                        <template x-if="event.category">
+                            <span class="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-medium bg-white/90 text-indigo-700 backdrop-blur-sm shadow-sm"
+                                  x-text="event.category"></span>
+                        </template>
+                    </div>
+
+                    <div class="p-5 flex flex-col flex-1">
                         <!-- Title -->
                         <h3 class="font-semibold text-gray-900 text-lg leading-snug mb-2">
                             <a :href="event.url" target="_blank" rel="noopener"
-                               class="hover:text-indigo-600 transition"
+                               class="hover:text-indigo-600 transition group-hover:text-indigo-600"
                                x-text="event.title"></a>
                         </h3>
 
                         <!-- Date -->
-                        <p class="text-sm text-gray-500 mb-1">
-                            <span class="mr-1">&#128197;</span>
+                        <div class="flex items-center gap-1.5 text-sm text-gray-500 mb-1">
+                            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                            </svg>
                             <span x-text="formatDate(event.date_start)"></span>
-                        </p>
+                        </div>
 
                         <!-- Location -->
                         <template x-if="event.location">
-                            <p class="text-sm text-gray-500 mb-3">
-                                <span class="mr-1">&#128205;</span>
+                            <div class="flex items-center gap-1.5 text-sm text-gray-500 mb-3">
+                                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                </svg>
                                 <span x-text="event.location"></span>
-                            </p>
+                            </div>
                         </template>
 
                         <!-- Description -->
-                        <p class="text-sm text-gray-600 line-clamp-3 flex-1"
-                           x-text="event.description"></p>
+                        <template x-if="event.description">
+                            <p class="text-sm text-gray-600 line-clamp-3 flex-1 mb-3"
+                               x-text="event.description"></p>
+                        </template>
 
                         <!-- Footer -->
-                        <div class="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
-                            <span class="text-xs text-gray-400" x-text="'Quelle: ' + event.source"></span>
+                        <div class="mt-auto pt-3 border-t border-gray-100 flex items-center justify-between">
+                            <span class="text-xs text-gray-400" x-text="'Quelle: ' + sourceLabel(event.source)"></span>
                             <template x-if="event.price">
-                                <span class="text-xs font-medium text-green-600" x-text="event.price"></span>
+                                <span class="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full"
+                                      x-text="event.price"></span>
                             </template>
                         </div>
                     </div>
                 </article>
             </template>
         </div>
+
+        <!-- Load more / pagination hint -->
+        <template x-if="filteredEvents.length > 0 && filteredEvents.length > 30">
+            <p class="text-center text-sm text-gray-400 mt-8">
+                Zeige alle <span x-text="filteredEvents.length"></span> Ergebnisse
+            </p>
+        </template>
     </main>
 
     <!-- Footer -->
     <footer class="bg-white border-t mt-12">
-        <div class="container mx-auto px-4 py-6 text-center text-sm text-gray-400">
-            <p>&copy; 2026 Bielefeld Events &middot; Daten werden täglich aktualisiert</p>
+        <div class="container mx-auto px-4 py-6">
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-2 text-sm text-gray-400">
+                <p>&copy; 2026 Bielefeld Events</p>
+                <p>Daten werden täglich automatisch aktualisiert</p>
+            </div>
         </div>
     </footer>
 
@@ -177,23 +276,57 @@
             return {
                 events: [],
                 loading: true,
+                error: false,
+                lastUpdated: '',
                 filters: {
                     dateFrom: '',
                     dateTo: '',
                     category: '',
                     location: '',
+                    source: '',
                     search: '',
                 },
 
                 async init() {
+                    this.loading = true;
+                    this.error = false;
                     try {
                         const resp = await fetch('events.json');
+                        if (!resp.ok) throw new Error('HTTP ' + resp.status);
                         this.events = await resp.json();
+                        if (this.events.length > 0 && this.events[0].scraped_at) {
+                            const d = new Date(this.events[0].scraped_at);
+                            this.lastUpdated = d.toLocaleDateString('de-DE', {
+                                day: '2-digit', month: '2-digit', year: 'numeric'
+                            });
+                        }
                     } catch (e) {
                         console.error('Failed to load events:', e);
                         this.events = [];
+                        this.error = true;
                     }
                     this.loading = false;
+                },
+
+                get categories() {
+                    const cats = new Set(
+                        this.events.map(e => e.category).filter(c => c && c.trim())
+                    );
+                    return [...cats].sort();
+                },
+
+                get locations() {
+                    const locs = new Set(
+                        this.events.map(e => e.location).filter(l => l && l.trim())
+                    );
+                    return [...locs].sort();
+                },
+
+                get sources() {
+                    const srcs = new Set(
+                        this.events.map(e => e.source).filter(s => s && s.trim())
+                    );
+                    return [...srcs].sort();
                 },
 
                 get filteredEvents() {
@@ -202,9 +335,13 @@
                         if (this.filters.dateTo && ev.date_start > this.filters.dateTo + 'T23:59:59') return false;
                         if (this.filters.category && ev.category !== this.filters.category) return false;
                         if (this.filters.location && ev.location !== this.filters.location) return false;
+                        if (this.filters.source && ev.source !== this.filters.source) return false;
                         if (this.filters.search) {
                             const q = this.filters.search.toLowerCase();
-                            const haystack = (ev.title + ' ' + ev.description + ' ' + ev.location).toLowerCase();
+                            const haystack = [
+                                ev.title, ev.description, ev.location,
+                                ev.category, this.sourceLabel(ev.source)
+                            ].join(' ').toLowerCase();
                             if (!haystack.includes(q)) return false;
                         }
                         return true;
@@ -212,20 +349,40 @@
                 },
 
                 resetFilters() {
-                    this.filters = { dateFrom: '', dateTo: '', category: '', location: '', search: '' };
+                    this.filters = {
+                        dateFrom: '', dateTo: '', category: '',
+                        location: '', source: '', search: ''
+                    };
+                },
+
+                sourceLabel(src) {
+                    const labels = {
+                        'bielefeld_jetzt': 'Bielefeld.Jetzt',
+                        'bielefeld_marketing': 'Bielefeld Marketing',
+                        'kulturamt': 'Kulturamt Bielefeld',
+                        'owl_journal': 'OWL Journal',
+                        'bielefeld_de': 'Stadt Bielefeld',
+                    };
+                    return labels[src] || src;
                 },
 
                 formatDate(iso) {
                     if (!iso) return '';
                     const d = new Date(iso);
-                    return d.toLocaleDateString('de-DE', {
+                    if (isNaN(d.getTime())) return iso;
+
+                    const opts = {
                         weekday: 'short',
                         day: '2-digit',
                         month: 'long',
                         year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                    });
+                    };
+                    // Only add time if not midnight
+                    if (d.getHours() !== 0 || d.getMinutes() !== 0) {
+                        opts.hour = '2-digit';
+                        opts.minute = '2-digit';
+                    }
+                    return d.toLocaleDateString('de-DE', opts);
                 },
             };
         }
