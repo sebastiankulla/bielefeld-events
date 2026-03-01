@@ -39,12 +39,17 @@ class StadtwerkeBielefeldScraper(BaseScraper):
     def _extract_events(self, soup: BeautifulSoup) -> list[Event]:
         events = []
 
-        containers = soup.select(
-            "article, .event-item, .event-card, .event, "
-            ".veranstaltung, .termin, .termin-item, "
-            "[class*='event'], [class*='veranstaltung'], "
-            ".card, .list-item, .teaser"
-        )
+        # Try Drupal masonry layout first (used by bielefeld-marketing.de)
+        containers = soup.select(".veranstaltung.masonry-view-item")
+
+        # Fall back to generic selectors
+        if not containers:
+            containers = soup.select(
+                "article, .event-item, .event-card, .event, "
+                ".veranstaltung, .termin, .termin-item, "
+                "[class*='event'], [class*='veranstaltung'], "
+                ".card, .list-item, .teaser"
+            )
 
         for card in containers:
             event = self._parse_card(card)
@@ -58,10 +63,16 @@ class StadtwerkeBielefeldScraper(BaseScraper):
         return events
 
     def _parse_card(self, card) -> Event | None:
-        title_el = card.select_one(
-            "h2, h3, h4, .titel, .title, a[href], "
-            "[class*='title'], [class*='titel']"
-        )
+        # Prefer headings – select_one returns first in document order,
+        # so we search headings separately to avoid matching a wrapping
+        # <a> or Drupal field div before the actual heading.
+        title_el = card.select_one("h2, h3, h4")
+        if not title_el:
+            title_el = card.select_one(
+                ".titel, .title, [class*='title'], [class*='titel']"
+            )
+        if not title_el:
+            title_el = card.select_one("a[href]")
         if not title_el:
             return None
         title = title_el.get_text(strip=True)
@@ -89,7 +100,11 @@ class StadtwerkeBielefeldScraper(BaseScraper):
         # Location - use the robust multi-strategy extraction
         location = self._extract_location_from_card(card)
 
-        img_el = card.select_one("img[src]")
+        # Image – check card itself, then parent (masonry layouts put
+        # images in a sibling wrapper, not inside the text container)
+        img_el = card.select_one("img[src], img[data-src]")
+        if not img_el and card.parent:
+            img_el = card.parent.select_one("img[src], img[data-src]")
         image_url = ""
         if img_el:
             image_url = self._absolute_url(

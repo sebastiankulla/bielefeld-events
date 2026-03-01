@@ -43,13 +43,17 @@ class BielefeldJetztScraper(BaseScraper):
         """Extract events from a page using multiple selector strategies."""
         events = []
 
-        # Strategy 1: Look for structured event containers
-        containers = soup.select(
-            "article, .event-item, .event-card, .event, "
-            ".termin, .termin-item, .termine-item, "
-            "[class*='event'], [class*='termin'], "
-            ".card, .list-item"
-        )
+        # Strategy 1: Try Drupal masonry layout (used by bielefeld.jetzt)
+        containers = soup.select(".veranstaltung.masonry-view-item")
+
+        # Strategy 2: Fall back to generic event containers
+        if not containers:
+            containers = soup.select(
+                "article, .event-item, .event-card, .event, "
+                ".termin, .termin-item, .termine-item, "
+                "[class*='event'], [class*='termin'], "
+                ".card, .list-item"
+            )
 
         for card in containers:
             event = self._parse_card(card)
@@ -63,13 +67,15 @@ class BielefeldJetztScraper(BaseScraper):
         return events
 
     def _parse_card(self, card) -> Event | None:
-        # Find title - try multiple selectors
-        title_el = card.select_one(
-            "h2, h3, h4, .event-title, .title, .termin-title, "
-            "[class*='title'], [class*='name']"
-        )
+        # Find title – prefer headings (select_one returns first in
+        # document order, so we search headings separately to avoid
+        # matching a wrapping <a> or Drupal field div before the heading)
+        title_el = card.select_one("h2, h3, h4")
         if not title_el:
-            # Try the first meaningful link
+            title_el = card.select_one(
+                ".event-title, .title, .termin-title, [class*='title']"
+            )
+        if not title_el:
             title_el = card.select_one("a[href]")
         if not title_el:
             return None
@@ -108,8 +114,11 @@ class BielefeldJetztScraper(BaseScraper):
         # Location - use the robust multi-strategy extraction
         location = self._extract_location_from_card(card)
 
-        # Image
-        img_el = card.select_one("img[src]")
+        # Image – check card itself, then parent (masonry layouts put
+        # images in a sibling wrapper, not inside the text container)
+        img_el = card.select_one("img[src], img[data-src]")
+        if not img_el and card.parent:
+            img_el = card.parent.select_one("img[src], img[data-src]")
         image_url = ""
         if img_el:
             image_url = self._absolute_url(
