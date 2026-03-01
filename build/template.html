@@ -282,7 +282,18 @@
 
                                 <!-- Footer -->
                                 <div class="mt-auto pt-3 border-t border-gray-100 flex items-center justify-between">
-                                    <span class="text-xs text-gray-400" x-text="'Quelle: ' + sourceLabel(event.source)"></span>
+                                    <div class="flex flex-wrap gap-1 items-center">
+                                        <template x-if="event.sources && event.sources.length > 1">
+                                            <span class="text-xs text-gray-400 mr-0.5">Quellen:</span>
+                                        </template>
+                                        <template x-if="!event.sources || event.sources.length <= 1">
+                                            <span class="text-xs text-gray-400 mr-0.5">Quelle:</span>
+                                        </template>
+                                        <template x-for="(src, idx) in (event.sources || [{source: event.source}])" :key="src.source">
+                                            <span class="text-xs text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded"
+                                                  x-text="sourceLabel(src.source)"></span>
+                                        </template>
+                                    </div>
                                     <template x-if="event.price">
                                         <span class="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full"
                                               x-text="event.price"></span>
@@ -395,7 +406,7 @@
                                 </div>
                             </template>
 
-                            <!-- Source -->
+                            <!-- Sources -->
                             <div class="flex items-start gap-3">
                                 <div class="w-10 h-10 rounded-lg bg-gray-50 flex items-center justify-center flex-shrink-0">
                                     <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -404,8 +415,18 @@
                                     </svg>
                                 </div>
                                 <div>
-                                    <p class="text-sm text-gray-500 font-medium">Quelle</p>
-                                    <p class="text-gray-900" x-text="sourceLabel(selectedEvent.source)"></p>
+                                    <p class="text-sm text-gray-500 font-medium" x-text="(selectedEvent.sources && selectedEvent.sources.length > 1) ? 'Quellen' : 'Quelle'"></p>
+                                    <template x-if="!selectedEvent.sources || selectedEvent.sources.length <= 1">
+                                        <p class="text-gray-900" x-text="sourceLabel(selectedEvent.source)"></p>
+                                    </template>
+                                    <template x-if="selectedEvent.sources && selectedEvent.sources.length > 1">
+                                        <div class="flex flex-wrap gap-1.5 mt-1">
+                                            <template x-for="src in selectedEvent.sources" :key="src.source">
+                                                <span class="text-sm text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md"
+                                                      x-text="sourceLabel(src.source)"></span>
+                                            </template>
+                                        </div>
+                                    </template>
                                 </div>
                             </div>
                         </div>
@@ -420,8 +441,10 @@
 
                         <!-- Action Buttons -->
                         <div class="flex flex-col sm:flex-row gap-3 pt-6 border-t border-gray-100">
-                            <template x-if="selectedEvent.url">
-                                <a :href="selectedEvent.url"
+                            <!-- Single source: one button -->
+                            <template x-if="!selectedEvent.sources || selectedEvent.sources.length <= 1">
+                                <a x-show="selectedEvent.url"
+                                   :href="selectedEvent.url"
                                    target="_blank"
                                    rel="noopener"
                                    class="inline-flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition font-medium shadow-sm">
@@ -431,6 +454,24 @@
                                     </svg>
                                     Zur Quelle
                                 </a>
+                            </template>
+                            <!-- Multiple sources: one button per source -->
+                            <template x-if="selectedEvent.sources && selectedEvent.sources.length > 1">
+                                <div class="flex flex-col sm:flex-row gap-2">
+                                    <template x-for="src in selectedEvent.sources" :key="src.source">
+                                        <a x-show="src.url"
+                                           :href="src.url"
+                                           target="_blank"
+                                           rel="noopener"
+                                           class="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition font-medium shadow-sm text-sm">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                      d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                                            </svg>
+                                            <span x-text="sourceLabel(src.source)"></span>
+                                        </a>
+                                    </template>
+                                </div>
                             </template>
                             <button @click="closeDetail()"
                                     class="inline-flex items-center justify-center gap-2 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition font-medium">
@@ -517,9 +558,16 @@
                 },
 
                 get sources() {
-                    const srcs = new Set(
-                        this.events.map(e => e.source).filter(s => s && s.trim())
-                    );
+                    const srcs = new Set();
+                    for (const e of this.events) {
+                        if (e.sources && e.sources.length) {
+                            for (const s of e.sources) {
+                                if (s.source && s.source.trim()) srcs.add(s.source);
+                            }
+                        } else if (e.source && e.source.trim()) {
+                            srcs.add(e.source);
+                        }
+                    }
                     return [...srcs].sort();
                 },
 
@@ -556,12 +604,20 @@
                         if (this.filters.dateTo && ev.date_start > this.filters.dateTo + 'T23:59:59') return false;
                         if (this.filters.category && ev.category !== this.filters.category) return false;
                         if (this.filters.location && ev.location !== this.filters.location) return false;
-                        if (this.filters.source && ev.source !== this.filters.source) return false;
+                        if (this.filters.source) {
+                            const evSources = ev.sources
+                                ? ev.sources.map(s => s.source)
+                                : [ev.source];
+                            if (!evSources.includes(this.filters.source)) return false;
+                        }
                         if (this.filters.search) {
                             const q = this.filters.search.toLowerCase();
+                            const sourceLabels = ev.sources
+                                ? ev.sources.map(s => this.sourceLabel(s.source)).join(' ')
+                                : this.sourceLabel(ev.source);
                             const haystack = [
                                 ev.title, ev.description, ev.location,
-                                ev.category, this.sourceLabel(ev.source)
+                                ev.category, sourceLabels
                             ].join(' ').toLowerCase();
                             if (!haystack.includes(q)) return false;
                         }
