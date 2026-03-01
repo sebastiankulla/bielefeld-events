@@ -1,10 +1,17 @@
 """Scraper for Nr.z.P. (Nummer zu Platz) Bielefeld event listings."""
 
-import json
+import re
+from datetime import datetime
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
-from scrapers.base import BaseScraper, Event, parse_german_date
+from scrapers.base import BaseScraper, Event
+
+# Date format on the page: "Mi. 04 03" (weekday. day month)
+RE_NRZP_DATE = re.compile(r"(\d{1,2})\s+(\d{1,2})")
+
+# Time format on the page: "20 00 H" (hour minute)
+RE_NRZP_TIME = re.compile(r"(\d{1,2})\s+(\d{2})\s*H", re.IGNORECASE)
 
 
 class NrzpScraper(BaseScraper):
@@ -19,152 +26,104 @@ class NrzpScraper(BaseScraper):
             html = self._get_page(f"{self.base_url}/programm")
             soup = BeautifulSoup(html, "lxml")
             events = self._extract_events(soup)
-            if not events:
-                events = self._extract_from_jsonld(soup)
             self.logger.info("Scraped %d events from %s", len(events), self.name)
         except Exception:
             self.logger.exception("Failed to scrape %s", self.name)
         return events
 
     def _extract_events(self, soup: BeautifulSoup) -> list[Event]:
+        """Extract events from the NRZP event calendar structure.
+
+        The HTML pattern is pairs of:
+          <div class="eventcalender-row">  (date, category, time)
+          <a class="menu_img_btn">          (title, link, image)
+        """
         events = []
+        now = datetime.now()
 
-        # NRZP uses Elementor-based cards
-        containers = soup.select(
-            "article, .event-item, .event-card, .event, "
-            "[class*='event'], .elementor-post, "
-            ".card, .entry, .wp-block-post, "
-            ".elementor-element a[href]"
-        )
+        for row in soup.select("div.eventcalender-row"):
+            # Extract metadata from the calendar row
+            date_text = self._text_from(row, ".eventcalender-date")
+            category = self._text_from(row, ".eventcalender-art")
+            time_text = self._text_from(row, ".eventcalender-time")
 
-        for card in containers:
-            event = self._parse_card(card)
-            if event:
-                events.append(event)
+            date_start = self._parse_nrzp_datetime(date_text, time_text, now)
+            if not date_start:
+                continue
 
-        # Fallback: try to extract events from link patterns
-        if not events:
-            events = self._extract_from_links(soup)
+            # The event link is the next sibling <a> element
+            link_el = row.find_next_sibling("a", class_="menu_img_btn")
+            if not link_el:
+                continue
+
+            title_el = link_el.select_one("span.span_left")
+            title = title_el.get_text(strip=True) if title_el else ""
+            if not title:
+                title = link_el.get_text(strip=True)
+            if not title:
+                continue
+
+            url = link_el.get("href", "")
+
+            img_el = link_el.select_one("img.menu_img")
+            image_url = ""
+            if img_el:
+                image_url = img_el.get("data-src", "") or img_el.get("src", "")
+
+            events.append(Event(
+                title=title,
+                date_start=date_start,
+                source=self.name,
+                url=url,
+                description="",
+                location="Nr.z.P. Bielefeld",
+                category=category or "Subkultur",
+                image_url=image_url,
+            ))
 
         return events
 
-    def _parse_card(self, card) -> Event | None:
-        title_el = card.select_one(
-            "h2, h3, h4, .title, .event-title, "
-            "[class*='title'], a[href]"
-        )
-        if not title_el:
-            return None
-        title = title_el.get_text(strip=True)
-        if not title or len(title) < 3:
-            return None
+    @staticmethod
+    def _text_from(parent: Tag, selector: str) -> str:
+        """Get stripped text from a child element selected by CSS."""
+        el = parent.select_one(selector)
+        return el.get_text(strip=True) if el else ""
 
-        link_el = card.select_one("a[href]")
-        url = self._absolute_url(link_el["href"]) if link_el else ""
+    @staticmethod
+    def _parse_nrzp_datetime(
+        date_text: str, time_text: str, reference: datetime
+    ) -> datetime | None:
+        """Parse NRZP date ('Mi. 04 03') and time ('20 00 H') into a datetime.
 
-        date_el = card.select_one(
-            "time, .date, .datum, [class*='date'], [class*='datum']"
-        )
-        date_start = self._parse_date_element(date_el)
-        if not date_start:
-            date_start = parse_german_date(card.get_text())
-        if not date_start:
+        The year is not shown on the page, so we infer it from the current date:
+        dates more than 2 months in the past are assumed to be next year.
+        """
+        date_match = RE_NRZP_DATE.search(date_text)
+        if not date_match:
             return None
 
-        desc_el = card.select_one(
-            "p, .description, .text, [class*='desc']"
-        )
-        description = desc_el.get_text(strip=True) if desc_el else ""
+        day = int(date_match.group(1))
+        month = int(date_match.group(2))
 
-        # Category from labels
-        category = ""
-        for el in card.select("span, .category, [class*='category'], [class*='tag']"):
-            text = el.get_text(strip=True)
-            if text and len(text) < 30:
-                category = text
-                break
+        hour, minute = 0, 0
+        time_match = RE_NRZP_TIME.search(time_text)
+        if time_match:
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2))
 
-        img_el = card.select_one("img[src]")
-        image_url = ""
-        if img_el:
-            image_url = self._absolute_url(
-                img_el.get("data-src", "") or img_el.get("src", "")
-            )
+        # Infer year: assume current year, but if date is >2 months in the past,
+        # use next year (venue likely lists upcoming events only)
+        year = reference.year
+        try:
+            dt = datetime(year, month, day, hour, minute)
+        except ValueError:
+            return None
 
-        return Event(
-            title=title,
-            date_start=date_start,
-            source=self.name,
-            url=url,
-            description=description,
-            location="Nr.z.P. Bielefeld",
-            category=category or "Subkultur",
-            image_url=image_url,
-        )
-
-    def _extract_from_links(self, soup: BeautifulSoup) -> list[Event]:
-        """Fallback: extract events from links with date info."""
-        events = []
-        seen = set()
-        for link in soup.select("a[href]"):
-            href = link.get("href", "")
-            if not href or href == "#":
-                continue
-            text = link.get_text(strip=True)
-            if not text or len(text) < 3:
-                continue
-
-            # Look for date in surrounding context
-            parent = link.parent
-            if parent:
-                parent_text = parent.get_text()
-                date = parse_german_date(parent_text)
-                if date and text not in seen:
-                    seen.add(text)
-                    url = self._absolute_url(href)
-                    img_el = link.select_one("img[src]")
-                    image_url = ""
-                    if img_el:
-                        image_url = self._absolute_url(
-                            img_el.get("data-src", "") or img_el.get("src", "")
-                        )
-                    events.append(Event(
-                        title=text,
-                        date_start=date,
-                        source=self.name,
-                        url=url,
-                        location="Nr.z.P. Bielefeld",
-                        category="Subkultur",
-                        image_url=image_url,
-                    ))
-        return events
-
-    def _extract_from_jsonld(self, soup: BeautifulSoup) -> list[Event]:
-        """Extract events from JSON-LD structured data."""
-        events = []
-        for script in soup.select('script[type="application/ld+json"]'):
+        if (reference - dt).days > 60:
+            year += 1
             try:
-                data = json.loads(script.string)
-                items = data if isinstance(data, list) else [data]
-                for item in items:
-                    if item.get("@type") in ("Event", "MusicEvent", "TheaterEvent"):
-                        date = parse_german_date(item.get("startDate", ""))
-                        if date:
-                            image = item.get("image", "")
-                            if isinstance(image, list):
-                                image = image[0] if image else ""
-                            elif isinstance(image, dict):
-                                image = image.get("url", "")
-                            events.append(Event(
-                                title=item.get("name", ""),
-                                date_start=date,
-                                source=self.name,
-                                url=item.get("url", ""),
-                                description=item.get("description", ""),
-                                location="Nr.z.P. Bielefeld",
-                                category="Subkultur",
-                                image_url=image,
-                            ))
-            except (json.JSONDecodeError, TypeError, AttributeError):
-                continue
-        return events
+                dt = datetime(year, month, day, hour, minute)
+            except ValueError:
+                return None
+
+        return dt
