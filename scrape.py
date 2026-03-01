@@ -13,6 +13,7 @@ from scrapers.database import init_db, upsert_events
 from scrapers.kulturamt import KulturamtScraper
 from scrapers.lokschuppen import LokschuppenScraper
 from scrapers.nrzp import NrzpScraper
+from scrapers.nw_events import NwEventsScraper
 from scrapers.owl_journal import OwlJournalScraper
 from scrapers.prime import PrimeScraper
 from scrapers.stadtwerke_bielefeld import StadtwerkeBielefeldScraper
@@ -36,6 +37,7 @@ SCRAPERS = [
     NrzpScraper,
     BuoScraper,
     PrimeScraper,
+    NwEventsScraper,
 ]
 
 
