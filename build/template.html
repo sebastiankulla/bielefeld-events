@@ -70,7 +70,15 @@
                                     ? 'bg-indigo-600 text-white shadow-md'
                                     : 'bg-white text-gray-700 hover:bg-gray-100'"
                                 class="flex-shrink-0 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 border border-gray-200 shadow-sm">
-                            Alle
+                            Alle Tage
+                        </button>
+                        <!-- "Heute" tile -->
+                        <button @click="filters.day = new Date().toISOString().substring(0, 10)"
+                                :class="filters.day === new Date().toISOString().substring(0, 10)
+                                    ? 'bg-indigo-600 text-white shadow-md'
+                                    : 'bg-white text-gray-700 hover:bg-gray-100'"
+                                class="flex-shrink-0 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 border border-gray-200 shadow-sm">
+                            Heute
                         </button>
                         <template x-for="day in availableDays" :key="day.key">
                             <button @click="filters.day = day.key"
@@ -91,23 +99,7 @@
 
                 <!-- Filters -->
                 <div class="bg-white rounded-xl shadow-sm p-6 mb-8">
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-
-                        <!-- Date from -->
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Datum ab</label>
-                            <input type="date"
-                                   x-model="filters.dateFrom"
-                                   class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-                        </div>
-
-                        <!-- Date to -->
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Datum bis</label>
-                            <input type="date"
-                                   x-model="filters.dateTo"
-                                   class="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-                        </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 
                         <!-- Category filter -->
                         <div>
@@ -506,8 +498,6 @@
                 lastUpdated: '',
                 selectedEvent: null,
                 filters: {
-                    dateFrom: '',
-                    dateTo: '',
                     category: '',
                     location: '',
                     source: '',
@@ -528,6 +518,9 @@
                                 day: '2-digit', month: '2-digit', year: 'numeric'
                             });
                         }
+                        // Default: show today's events
+                        const today = new Date().toISOString().substring(0, 10);
+                        this.filters.day = today;
                     } catch (e) {
                         console.error('Failed to load events:', e);
                         this.events = [];
@@ -600,8 +593,6 @@
                             const evDay = ev.date_start ? ev.date_start.substring(0, 10) : '';
                             if (evDay !== this.filters.day) return false;
                         }
-                        if (this.filters.dateFrom && ev.date_start < this.filters.dateFrom) return false;
-                        if (this.filters.dateTo && ev.date_start > this.filters.dateTo + 'T23:59:59') return false;
                         if (this.filters.category && ev.category !== this.filters.category) return false;
                         if (this.filters.location && ev.location !== this.filters.location) return false;
                         if (this.filters.source) {
@@ -640,8 +631,8 @@
 
                 resetFilters() {
                     this.filters = {
-                        dateFrom: '', dateTo: '', category: '',
-                        location: '', source: '', search: '', day: ''
+                        category: '', location: '', source: '', search: '',
+                        day: new Date().toISOString().substring(0, 10),
                     };
                 },
 
