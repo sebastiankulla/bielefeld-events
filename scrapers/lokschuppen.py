@@ -1,100 +1,135 @@
 """Scraper for Lokschuppen Bielefeld event listings."""
 
 import json
+import re
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from scrapers.base import BaseScraper, Event, parse_german_date
 
 
 class LokschuppenScraper(BaseScraper):
-    """Scrapes events from Lokschuppen Bielefeld (event venue)."""
+    """Scrapes events from Lokschuppen Bielefeld (event venue).
+
+    The ``/event/`` page lists events in a custom layout using
+    ``div.event`` containers (not standard article elements).  Each
+    container has:
+
+    * ``div.img`` with an ``<a>`` linking to the detail page and an
+      ``<img>`` for the poster.
+    * ``span.details`` with a child ``<div>`` holding the title and a
+      date string like ``01.03.2026``.
+    """
 
     name = "lokschuppen"
     base_url = "https://www.lokschuppen-bielefeld.de"
 
-    PATHS = [
-        "/veranstaltungen/",
-        "/event/",
-    ]
-
     def scrape(self) -> list[Event]:
         events = []
-        seen_titles = set()
+        seen = set()
 
-        for path in self.PATHS:
+        try:
+            html = self._get_page(f"{self.base_url}/event/")
+            soup = BeautifulSoup(html, "lxml")
+            page_events = self._extract_event_divs(soup)
+            for ev in page_events:
+                key = (ev.title, ev.date_start.date())
+                if key not in seen:
+                    seen.add(key)
+                    events.append(ev)
+        except Exception:
+            self.logger.exception("Failed to scrape %s/event/", self.base_url)
+
+        if not events:
             try:
-                html = self._get_page(f"{self.base_url}{path}")
+                html = self._get_page(f"{self.base_url}/veranstaltungen/")
                 soup = BeautifulSoup(html, "lxml")
-                page_events = self._extract_events(soup)
-                for ev in page_events:
-                    key = (ev.title, ev.date_start.date())
-                    if key not in seen_titles:
-                        seen_titles.add(key)
-                        events.append(ev)
+                events = self._extract_from_jsonld(soup)
             except Exception:
-                self.logger.exception("Failed to scrape %s%s", self.base_url, path)
+                self.logger.exception(
+                    "Failed to scrape %s/veranstaltungen/", self.base_url,
+                )
 
         self.logger.info("Scraped %d events from %s", len(events), self.name)
         return events
 
-    def _extract_events(self, soup: BeautifulSoup) -> list[Event]:
+    def _extract_event_divs(self, soup: BeautifulSoup) -> list[Event]:
+        """Extract events from the custom div.event containers."""
         events = []
+        # Select only direct event divs (have "event" as a class plus
+        # modifier classes like cnt0, mod40, etc.)
+        archive = soup.select_one(".events-archive, .events-grid")
+        if not archive:
+            return events
 
-        containers = soup.select(
-            "article, .event-item, .event-card, .event, "
-            ".veranstaltung, [class*='event'], "
-            ".card, .entry, .wp-block-post"
-        )
-
-        for card in containers:
-            event = self._parse_card(card)
+        for card in archive.select("div.event"):
+            event = self._parse_event_div(card)
             if event:
                 events.append(event)
-
-        if not events:
-            events = self._extract_from_jsonld(soup)
-
         return events
 
-    def _parse_card(self, card) -> Event | None:
-        title_el = card.select_one(
-            "h2, h3, h4, .title, .titel, "
-            "[class*='title'], a[href]"
-        )
-        if not title_el:
-            return None
-        title = title_el.get_text(strip=True)
-        if not title or len(title) < 3:
+    def _parse_event_div(self, card: Tag) -> Event | None:
+        # Title – inside span.details > div (first div child)
+        details = card.select_one("span.details")
+        if not details:
             return None
 
-        link_el = card.select_one("a[href]")
-        url = self._absolute_url(link_el["href"]) if link_el else ""
+        title_div = details.select_one("div")
+        if not title_div:
+            return None
 
-        date_el = card.select_one(
-            "time, .datum, .date, [class*='date'], [class*='datum']"
-        )
-        date_start = self._parse_date_element(date_el)
+        # The title div contains the title text followed by a date string.
+        # Extract only the title (everything before the date).
+        full_text = title_div.get_text(strip=True)
+        if not full_text:
+            return None
+
+        # Split title from date: date looks like "DD.MM.YYYY" at the end
+        title = full_text
+        date_match = re.search(r"(\d{1,2}\.\d{1,2}\.\d{4})", full_text)
+        if date_match:
+            title = full_text[:date_match.start()].strip()
+
+        if not title or len(title) < 2:
+            return None
+
+        # Date
+        date_start = None
+        if date_match:
+            date_start = parse_german_date(date_match.group(1))
         if not date_start:
             date_start = parse_german_date(card.get_text())
         if not date_start:
             return None
 
-        desc_el = card.select_one(
-            "p, .description, .text, [class*='desc'], [class*='text']"
-        )
-        description = desc_el.get_text(strip=True) if desc_el else ""
+        # URL – from the image link or any link
+        link_el = card.select_one("a.img, a[href*='/event/']")
+        if not link_el:
+            link_el = card.select_one("a[href]")
+        url = self._absolute_url(link_el["href"]) if link_el else ""
 
-        location = self._extract_location_from_card(card)
-        if not location:
-            location = "Lokschuppen Bielefeld"
-
-        img_el = card.select_one("img[src]")
+        # Image
         image_url = ""
+        img_el = card.select_one("img[src]")
         if img_el:
             image_url = self._absolute_url(
-                img_el.get("data-src", "") or img_el.get("src", "")
+                img_el.get("data-lazy-src", "")
+                or img_el.get("data-src", "")
+                or img_el.get("src", "")
             )
+
+        # Description – check for extra text after the date
+        description = ""
+        if date_match:
+            after_date = full_text[date_match.end():].strip()
+            # Remove "Tickets kaufen" etc. from the end
+            after_date = re.sub(
+                r"(?:Tickets\s*kaufen|Ausverkauft|Abgesagt|"
+                r"Nur Abendkasse|Verschoben.*?)$",
+                "", after_date, flags=re.IGNORECASE,
+            ).strip()
+            if after_date and after_date != title:
+                description = after_date
 
         return Event(
             title=title,
@@ -102,7 +137,7 @@ class LokschuppenScraper(BaseScraper):
             source=self.name,
             url=url,
             description=description,
-            location=location,
+            location="Lokschuppen Bielefeld",
             image_url=image_url,
         )
 

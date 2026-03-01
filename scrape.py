@@ -14,6 +14,7 @@ from scrapers.kulturamt import KulturamtScraper
 from scrapers.lokschuppen import LokschuppenScraper
 from scrapers.nrzp import NrzpScraper
 from scrapers.owl_journal import OwlJournalScraper
+from scrapers.prime import PrimeScraper
 from scrapers.stadtwerke_bielefeld import StadtwerkeBielefeldScraper
 from scrapers.stereo import StereoScraper
 
@@ -34,6 +35,7 @@ SCRAPERS = [
     BunkerUlmenwallScraper,
     NrzpScraper,
     BuoScraper,
+    PrimeScraper,
 ]
 
 
