@@ -1,0 +1,153 @@
+"""Scraper for Bühnen und Orchester der Stadt Bielefeld (BUO) event listings."""
+
+import json
+
+from bs4 import BeautifulSoup
+
+from scrapers.base import BaseScraper, Event, parse_german_date
+
+
+class BuoScraper(BaseScraper):
+    """Scrapes events from BUO Bielefeld (theater & orchestra)."""
+
+    name = "buo"
+    base_url = "https://www.buo-bielefeld.de"
+
+    PATHS = [
+        "/theater/veranstaltung",
+        "/theater/kalender",
+        "/philharmoniker/kalender",
+    ]
+
+    def scrape(self) -> list[Event]:
+        events = []
+        seen_titles = set()
+
+        for path in self.PATHS:
+            try:
+                html = self._get_page(f"{self.base_url}{path}")
+                soup = BeautifulSoup(html, "lxml")
+                page_events = self._extract_events(soup)
+                for ev in page_events:
+                    key = (ev.title, ev.date_start.date())
+                    if key not in seen_titles:
+                        seen_titles.add(key)
+                        events.append(ev)
+            except Exception:
+                self.logger.exception("Failed to scrape %s%s", self.base_url, path)
+
+        self.logger.info("Scraped %d events from %s", len(events), self.name)
+        return events
+
+    def _extract_events(self, soup: BeautifulSoup) -> list[Event]:
+        events = []
+
+        containers = soup.select(
+            "article, .event-item, .event-card, .event, "
+            ".veranstaltung, [class*='event'], [class*='veranstaltung'], "
+            ".card, .entry, .list-item, .teaser, .termin"
+        )
+
+        for card in containers:
+            event = self._parse_card(card)
+            if event:
+                events.append(event)
+
+        if not events:
+            events = self._extract_from_jsonld(soup)
+
+        return events
+
+    def _parse_card(self, card) -> Event | None:
+        title_el = card.select_one(
+            "h2, h3, h4, .title, .titel, "
+            "[class*='title'], [class*='titel'], a[href]"
+        )
+        if not title_el:
+            return None
+        title = title_el.get_text(strip=True)
+        if not title or len(title) < 3:
+            return None
+
+        link_el = card.select_one("a[href]")
+        url = self._absolute_url(link_el["href"]) if link_el else ""
+
+        date_el = card.select_one(
+            "time, .datum, .date, [class*='date'], [class*='datum']"
+        )
+        date_start = self._parse_date_element(date_el)
+        if not date_start:
+            date_start = parse_german_date(card.get_text())
+        if not date_start:
+            return None
+
+        desc_el = card.select_one(
+            "p, .beschreibung, .text, .description, .subtitle, "
+            "[class*='desc'], [class*='text'], [class*='subtitle']"
+        )
+        description = desc_el.get_text(strip=True) if desc_el else ""
+
+        location = self._extract_location_from_card(card)
+        if not location:
+            location = "Theater Bielefeld"
+
+        # Category from tags/list items
+        category = ""
+        for el in card.select("li, .category, .kategorie, [class*='category']"):
+            text = el.get_text(strip=True)
+            if text and len(text) < 30:
+                category = text
+                break
+
+        img_el = card.select_one("img[src]")
+        image_url = ""
+        if img_el:
+            image_url = self._absolute_url(
+                img_el.get("data-src", "") or img_el.get("src", "")
+            )
+
+        return Event(
+            title=title,
+            date_start=date_start,
+            source=self.name,
+            url=url,
+            description=description,
+            location=location,
+            category=category or "Theater & Musik",
+            image_url=image_url,
+        )
+
+    def _extract_from_jsonld(self, soup: BeautifulSoup) -> list[Event]:
+        """Extract events from JSON-LD structured data."""
+        events = []
+        for script in soup.select('script[type="application/ld+json"]'):
+            try:
+                data = json.loads(script.string)
+                items = data if isinstance(data, list) else [data]
+                for item in items:
+                    if item.get("@type") in (
+                        "Event", "MusicEvent", "TheaterEvent",
+                        "DanceEvent", "ComedyEvent",
+                    ):
+                        date = parse_german_date(item.get("startDate", ""))
+                        if date:
+                            image = item.get("image", "")
+                            if isinstance(image, list):
+                                image = image[0] if image else ""
+                            elif isinstance(image, dict):
+                                image = image.get("url", "")
+                            events.append(Event(
+                                title=item.get("name", ""),
+                                date_start=date,
+                                source=self.name,
+                                url=item.get("url", ""),
+                                description=item.get("description", ""),
+                                location=self._parse_jsonld_location(
+                                    item.get("location")
+                                ) or "Theater Bielefeld",
+                                category="Theater & Musik",
+                                image_url=image,
+                            ))
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                continue
+        return events

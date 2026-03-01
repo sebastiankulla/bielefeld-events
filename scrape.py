@@ -6,10 +6,16 @@ import sys
 import time
 
 from scrapers.bielefeld_jetzt import BielefeldJetztScraper
+from scrapers.bunker_ulmenwall import BunkerUlmenwallScraper
+from scrapers.buo import BuoScraper
+from scrapers.cafe_europa import CafeEuropaScraper
 from scrapers.database import init_db, upsert_events
 from scrapers.kulturamt import KulturamtScraper
+from scrapers.lokschuppen import LokschuppenScraper
+from scrapers.nrzp import NrzpScraper
 from scrapers.owl_journal import OwlJournalScraper
 from scrapers.stadtwerke_bielefeld import StadtwerkeBielefeldScraper
+from scrapers.stereo import StereoScraper
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +28,12 @@ SCRAPERS = [
     StadtwerkeBielefeldScraper,
     KulturamtScraper,
     OwlJournalScraper,
+    StereoScraper,
+    LokschuppenScraper,
+    CafeEuropaScraper,
+    BunkerUlmenwallScraper,
+    NrzpScraper,
+    BuoScraper,
 ]
 
 
