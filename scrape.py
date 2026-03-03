@@ -5,6 +5,7 @@ import logging
 import sys
 import time
 
+from build.generate import main as generate_site
 from scrapers.bielefeld_jetzt import BielefeldJetztScraper
 from scrapers.bunker_ulmenwall import BunkerUlmenwallScraper
 from scrapers.buo import BuoScraper
@@ -74,6 +75,9 @@ def main() -> int:
         "Done. Total events stored: %d | Scrapers: %d OK, %d failed",
         total, len(SCRAPERS) - failed, failed,
     )
+
+    logger.info("Generating site...")
+    generate_site()
     return 0
 
 
