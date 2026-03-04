@@ -1,8 +1,13 @@
 """Scraper for bielefeld.jetzt event listings."""
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from bs4 import BeautifulSoup
 
 from scrapers.base import BaseScraper, Event
+
+# Max parallel detail-page fetches for events missing an image
+_DETAIL_FETCH_WORKERS = 8
 
 
 class BielefeldJetztScraper(BaseScraper):
@@ -36,8 +41,93 @@ class BielefeldJetztScraper(BaseScraper):
             except Exception:
                 self.logger.exception("Failed to scrape %s%s", self.base_url, path)
 
+        # Enrich events that have no image by fetching their detail page
+        events = self._fill_missing_images(events)
+
         self.logger.info("Scraped %d events from %s", len(events), self.name)
         return events
+
+    def _fill_missing_images(self, events: list[Event]) -> list[Event]:
+        """Fetch detail pages in parallel for events that are missing an image."""
+        missing = [(i, ev) for i, ev in enumerate(events) if not ev.image_url and ev.url]
+        if not missing:
+            return events
+
+        self.logger.info(
+            "Fetching detail pages for %d events without images", len(missing)
+        )
+
+        def fetch_image(index_event):
+            idx, ev = index_event
+            try:
+                html = self._get_page(ev.url)
+                soup = BeautifulSoup(html, "lxml")
+                image_url = self._extract_detail_image(soup)
+                return idx, image_url
+            except Exception:
+                self.logger.warning("Failed to fetch detail page for %s", ev.url)
+                return idx, ""
+
+        with ThreadPoolExecutor(max_workers=_DETAIL_FETCH_WORKERS) as executor:
+            futures = {executor.submit(fetch_image, item): item for item in missing}
+            for future in as_completed(futures):
+                idx, image_url = future.result()
+                if image_url:
+                    events[idx] = Event(
+                        title=events[idx].title,
+                        date_start=events[idx].date_start,
+                        date_end=events[idx].date_end,
+                        source=events[idx].source,
+                        url=events[idx].url,
+                        description=events[idx].description,
+                        location=events[idx].location,
+                        city=events[idx].city,
+                        category=events[idx].category,
+                        image_url=image_url,
+                        price=events[idx].price,
+                        tags=events[idx].tags,
+                    )
+
+        return events
+
+    def _extract_detail_image(self, soup: BeautifulSoup) -> str:
+        """Extract the main event image from a detail page."""
+        # Try the main content area first to avoid logo/nav images
+        for container_sel in [
+            ".node__content",
+            "article",
+            "main",
+            ".field--name-field-bild",
+            ".field--type-image",
+        ]:
+            container = soup.select_one(container_sel)
+            if container:
+                img = container.select_one("img[src], img[data-src]")
+                if img:
+                    url = self._absolute_url(
+                        img.get("data-src", "") or img.get("src", "")
+                    )
+                    if url and not self._is_placeholder(url):
+                        return url
+
+        # Fallback: any content image on the page
+        for img in soup.find_all("img"):
+            src = img.get("data-src", "") or img.get("src", "")
+            if src and not self._is_placeholder(src):
+                url = self._absolute_url(src)
+                if url:
+                    return url
+
+        return ""
+
+    @staticmethod
+    def _is_placeholder(url: str) -> bool:
+        """Return True for UI icons, logos and other non-event images."""
+        lowered = url.lower()
+        return any(
+            kw in lowered
+            for kw in ("logo", "icon", "sprite", "data:image", "bielefeld-ui", "favicon")
+        )
 
     def _extract_events(self, soup: BeautifulSoup) -> list[Event]:
         """Extract events from a page using multiple selector strategies."""
