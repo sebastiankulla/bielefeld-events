@@ -147,13 +147,19 @@ def _create_session() -> requests.Session:
     return session
 
 
-def _download_image(url: str, session: requests.Session) -> str:
+_MIN_IMAGE_BYTES = 5_000  # hotlink-blocker placeholder images are tiny
+
+
+def _download_image(url: str, session: requests.Session, page_url: str = "") -> str:
     """Download an image to IMAGES_DIR and return its site-relative path.
 
-    Sets a matching Referer header so hotlink-protected servers allow the
-    request.  Returns an empty string if the download fails.
+    Uses ``page_url`` as the Referer header (simulating the browser loading
+    the image while viewing the event page), which satisfies most
+    same-domain hotlink-protection checks.  Falls back to the image URL's
+    own origin when no page_url is given.  Returns an empty string if the
+    download fails or the response looks like a hotlink-blocker placeholder.
     """
-    if not url:
+    if not url or url.startswith("data:"):
         return ""
 
     url_hash = hashlib.md5(url.encode()).hexdigest()
@@ -168,13 +174,24 @@ def _download_image(url: str, session: requests.Session) -> str:
     if local_path.exists():
         return f"images/{filename}"
 
-    referer = f"{parsed.scheme}://{parsed.netloc}/"
+    # Prefer the event's page URL as Referer; fall back to image origin.
+    if page_url:
+        referer = page_url
+    else:
+        referer = f"{parsed.scheme}://{parsed.netloc}/"
+
     try:
         response = session.get(url, timeout=15, headers={"Referer": referer})
         response.raise_for_status()
         content_type = response.headers.get("content-type", "")
         if "image" not in content_type and "octet-stream" not in content_type:
             logger.debug("Skipping non-image response for %s (%s)", url, content_type)
+            return ""
+        if len(response.content) < _MIN_IMAGE_BYTES:
+            logger.debug(
+                "Skipping suspiciously small image (%d bytes): %s",
+                len(response.content), url,
+            )
             return ""
         local_path.write_bytes(response.content)
         return f"images/{filename}"
@@ -194,7 +211,7 @@ def build_json() -> list[dict]:
     for ev in events:
         remote_url = ev.get("image_url", "")
         if remote_url and not remote_url.startswith("images/"):
-            local = _download_image(remote_url, session)
+            local = _download_image(remote_url, session, page_url=ev.get("url", ""))
             if local:
                 ev["image_url"] = local
                 downloaded += 1
