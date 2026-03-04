@@ -53,12 +53,28 @@ def _normalize_title(title: str) -> str:
     return t
 
 
+# Lower value = higher priority (preferred when merging duplicate events).
+# Sources not listed here get priority 0 (highest).
+_SOURCE_PRIORITY: dict[str, int] = {
+    "nw_events": 10,       # second to last
+    "bielefeld_jetzt": 20, # last
+}
+
+
+def _source_sort_key(ev: dict) -> int:
+    return _SOURCE_PRIORITY.get(ev.get("source", ""), 0)
+
+
 def deduplicate_events(events: list[dict]) -> list[dict]:
     """Merge events that appear on multiple sources into single entries.
 
     Groups events by normalised title + date (day only).  For each group the
     best available information is picked and all sources are collected in a
     ``sources`` list (each entry has ``source`` and ``url``).
+
+    Within each group events are sorted by source priority so that preferred
+    sources (venue pages, Kulturamt, …) are picked over aggregators like
+    nw.de or bielefeld-jetzt.de.
     """
     groups: dict[tuple[str, str], list[dict]] = {}
     for ev in events:
@@ -70,6 +86,9 @@ def deduplicate_events(events: list[dict]) -> list[dict]:
     merged: list[dict] = []
     dedup_count = 0
     for _key, group in groups.items():
+        # Sort by source priority so the most trusted source comes first
+        group = sorted(group, key=_source_sort_key)
+
         if len(group) == 1:
             ev = group[0]
             ev["sources"] = [{"source": ev["source"], "url": ev.get("url", "")}]
