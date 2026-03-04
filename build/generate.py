@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """Static site generator: reads events from SQLite, writes JSON + HTML."""
 
+import hashlib
 import json
 import logging
 import re
 import shutil
 import sys
 import unicodedata
+import urllib.parse
 from pathlib import Path
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Allow imports from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -22,7 +28,10 @@ logger = logging.getLogger("generate")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SITE_DIR = PROJECT_ROOT / "site"
+IMAGES_DIR = SITE_DIR / "images"
 TEMPLATE_PATH = PROJECT_ROOT / "build" / "template.html"
+
+_VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}
 
 # Characters to strip when normalizing titles for dedup comparison
 _RE_NON_ALNUM = re.compile(r"[^a-z0-9 ]+")
@@ -121,10 +130,79 @@ def deduplicate_events(events: list[dict]) -> list[dict]:
     return merged
 
 
+def _create_session() -> requests.Session:
+    session = requests.Session()
+    retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    })
+    return session
+
+
+def _download_image(url: str, session: requests.Session) -> str:
+    """Download an image to IMAGES_DIR and return its site-relative path.
+
+    Sets a matching Referer header so hotlink-protected servers allow the
+    request.  Returns an empty string if the download fails.
+    """
+    if not url:
+        return ""
+
+    url_hash = hashlib.md5(url.encode()).hexdigest()
+    parsed = urllib.parse.urlparse(url)
+    ext = Path(parsed.path).suffix.lower()
+    if ext not in _VALID_IMAGE_EXTENSIONS:
+        ext = ".jpg"
+
+    filename = f"{url_hash}{ext}"
+    local_path = IMAGES_DIR / filename
+
+    if local_path.exists():
+        return f"images/{filename}"
+
+    referer = f"{parsed.scheme}://{parsed.netloc}/"
+    try:
+        response = session.get(url, timeout=15, headers={"Referer": referer})
+        response.raise_for_status()
+        content_type = response.headers.get("content-type", "")
+        if "image" not in content_type and "octet-stream" not in content_type:
+            logger.debug("Skipping non-image response for %s (%s)", url, content_type)
+            return ""
+        local_path.write_bytes(response.content)
+        return f"images/{filename}"
+    except Exception:
+        logger.warning("Could not download image: %s", url)
+        return ""
+
+
 def build_json() -> list[dict]:
     """Export events to JSON file for Alpine.js to consume."""
     events = get_all_events()
     events = deduplicate_events(events)
+
+    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    session = _create_session()
+    downloaded = 0
+    for ev in events:
+        remote_url = ev.get("image_url", "")
+        if remote_url and not remote_url.startswith("images/"):
+            local = _download_image(remote_url, session)
+            if local:
+                ev["image_url"] = local
+                downloaded += 1
+            else:
+                ev["image_url"] = ""
+    if downloaded:
+        logger.info("Downloaded %d event images to %s", downloaded, IMAGES_DIR)
+
     output_path = SITE_DIR / "events.json"
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(events, f, ensure_ascii=False, indent=2)
@@ -143,6 +221,7 @@ def build_html() -> None:
 def main() -> int:
     init_db()
     SITE_DIR.mkdir(parents=True, exist_ok=True)
+    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
     events = build_json()
     build_html()
