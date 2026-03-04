@@ -17,7 +17,6 @@ from scrapers.nrzp import NrzpScraper
 from scrapers.nw_events import NwEventsScraper
 from scrapers.owl_journal import OwlJournalScraper
 from scrapers.prime import PrimeScraper
-from scrapers.stadtwerke_bielefeld import StadtwerkeBielefeldScraper
 from scrapers.stereo import StereoScraper
 
 logging.basicConfig(
@@ -28,7 +27,6 @@ logger = logging.getLogger("scrape")
 
 SCRAPERS = [
     BielefeldJetztScraper,
-    StadtwerkeBielefeldScraper,
     KulturamtScraper,
     OwlJournalScraper,
     StereoScraper,
