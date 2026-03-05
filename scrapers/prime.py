@@ -1,7 +1,8 @@
 """Scraper for Prime Club Bielefeld event listings."""
 
+import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from bs4 import BeautifulSoup
 
@@ -119,6 +120,15 @@ class PrimeScraper(BaseScraper):
         if not date_start:
             return None
 
+        # Try to fetch exact time from the event detail page (JSON-LD startDate)
+        if url:
+            time_from_detail = self._fetch_event_time(url)
+            if time_from_detail is not None:
+                date_start = date_start.replace(
+                    hour=time_from_detail.hour,
+                    minute=time_from_detail.minute,
+                )
+
         # Image
         image_url = ""
         img_el = card.select_one("img[src]")
@@ -134,3 +144,25 @@ class PrimeScraper(BaseScraper):
             category="Party",
             image_url=image_url,
         )
+
+    def _fetch_event_time(self, url: str) -> datetime | None:
+        """Fetch the event detail page and extract the start time from JSON-LD."""
+        try:
+            html = self._get_page(url)
+            soup = BeautifulSoup(html, "lxml")
+            for script in soup.select('script[type="application/ld+json"]'):
+                try:
+                    data = json.loads(script.string or "")
+                    if isinstance(data, list):
+                        data = data[0]
+                    start = data.get("startDate", "")
+                    if start:
+                        # e.g. "2026-03-06T23:00:00+01:00"
+                        dt = datetime.fromisoformat(start)
+                        # Convert to naive local time (strip timezone)
+                        return dt.replace(tzinfo=None)
+                except (json.JSONDecodeError, KeyError, ValueError, AttributeError):
+                    continue
+        except Exception:
+            self.logger.debug("Could not fetch event time from %s", url)
+        return None

@@ -13,6 +13,14 @@ RE_BUNKER_DATE = re.compile(
     re.IGNORECASE,
 )
 
+# Pattern for start time like "Beginn: 20.00 Uhr" or "Beginn: 20:00 Uhr".
+# The site sometimes splits <strong>Begin</strong>n, so we allow a space
+# between "Begin" and "n" after text extraction.
+RE_BUNKER_TIME = re.compile(
+    r"Begin\s*n\s*:?\s*(\d{1,2})[\.:](\d{2})\s*Uhr",
+    re.IGNORECASE,
+)
+
 
 class BunkerUlmenwallScraper(BaseScraper):
     """Scrapes events from Bunker Ulmenwall (sociocultural venue).
@@ -103,6 +111,15 @@ class BunkerUlmenwallScraper(BaseScraper):
         if not date_start:
             return None
 
+        # Try to fetch start time from the event detail page
+        if url:
+            time_from_detail = self._fetch_event_time(url)
+            if time_from_detail is not None:
+                date_start = date_start.replace(
+                    hour=time_from_detail[0],
+                    minute=time_from_detail[1],
+                )
+
         # Description
         desc_el = article.select_one(
             ".entry-summary, .entry-content, "
@@ -139,6 +156,24 @@ class BunkerUlmenwallScraper(BaseScraper):
             category=category or "Kultur",
             image_url=image_url,
         )
+
+    def _fetch_event_time(self, url: str) -> tuple[int, int] | None:
+        """Fetch the event detail page and extract the start time from text.
+
+        The site uses HTML like ``<strong>Beginn</strong>: 20.00 Uhr``, so
+        the regex must run against the rendered text, not the raw HTML.
+        """
+        try:
+            html = self._get_page(url)
+            soup = BeautifulSoup(html, "lxml")
+            content = soup.select_one(".entry-content, article, main") or soup
+            text = content.get_text(separator=" ")
+            m = RE_BUNKER_TIME.search(text)
+            if m:
+                return int(m.group(1)), int(m.group(2))
+        except Exception:
+            self.logger.debug("Could not fetch event time from %s", url)
+        return None
 
     def _extract_from_jsonld(self, soup: BeautifulSoup) -> list[Event]:
         """Extract events from JSON-LD structured data."""
