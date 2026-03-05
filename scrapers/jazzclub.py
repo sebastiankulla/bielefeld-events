@@ -123,9 +123,15 @@ class JazzclubScraper(BaseScraper):
         if p_el:
             description = p_el.get_text(strip=True)
 
-        # Image
+        # Image: check for lazy-loaded images first (data-lazy-src / data-src),
+        # then fall back to a plain src attribute.
+        # The image may live in a sibling element (e.g. Bootstrap media-left)
+        # rather than inside the container itself, so also search the parent.
         image_url = ""
-        img_el = container.select_one("img[src]")
+        img_search_root = container.parent if container.parent else container
+        img_el = img_search_root.select_one(
+            "img[data-lazy-src], img[data-src], img[src]"
+        )
         if img_el:
             image_url = self._absolute_url(
                 img_el.get("data-lazy-src", "")
