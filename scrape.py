@@ -19,6 +19,7 @@ from scrapers.nrzp import NrzpScraper
 from scrapers.nw_events import NwEventsScraper
 from scrapers.owl_journal import OwlJournalScraper
 from scrapers.prime import PrimeScraper
+from scrapers.forum_bielefeld import ForumBielefeldScraper
 from scrapers.stadthalle_bielefeld import StadthalleBielefeldScraper
 from scrapers.stereo import StereoScraper
 
@@ -43,6 +44,7 @@ SCRAPERS = [
     JazzclubScraper,
     IrishPubScraper,
     StadthalleBielefeldScraper,
+    ForumBielefeldScraper,
 ]
 
 
