@@ -36,6 +36,8 @@ _VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}
 # Characters to strip when normalizing titles for dedup comparison
 _RE_NON_ALNUM = re.compile(r"[^a-z0-9 ]+")
 _RE_MULTI_SPACE = re.compile(r"\s+")
+# Some scrapers append the city name to the title (e.g. "Vivid Indie Bielefeld")
+_RE_CITY_SUFFIX = re.compile(r"\s+bielefeld$")
 
 
 def _normalize_title(title: str) -> str:
@@ -50,6 +52,8 @@ def _normalize_title(title: str) -> str:
     t = "".join(c for c in t if not unicodedata.combining(c))
     t = _RE_NON_ALNUM.sub(" ", t)
     t = _RE_MULTI_SPACE.sub(" ", t).strip()
+    # Strip trailing city name that some scrapers append to the title
+    t = _RE_CITY_SUFFIX.sub("", t)
     return t
 
 
