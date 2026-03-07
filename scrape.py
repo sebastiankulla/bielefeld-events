@@ -22,6 +22,7 @@ from scrapers.owl_journal import OwlJournalScraper
 from scrapers.prime import PrimeScraper
 from scrapers.forum_bielefeld import ForumBielefeldScraper
 from scrapers.lenkwerk import LenkwerkScraper
+from scrapers.movie_bielefeld import MovieBielefeldScraper
 from scrapers.stadthalle_bielefeld import StadthalleBielefeldScraper
 from scrapers.stereo import StereoScraper
 from scrapers.verl import VerlScraper
@@ -50,6 +51,7 @@ SCRAPERS = [
     StadthalleBielefeldScraper,
     ForumBielefeldScraper,
     LenkwerkScraper,
+    MovieBielefeldScraper,
     VerlScraper,
 ]
 
