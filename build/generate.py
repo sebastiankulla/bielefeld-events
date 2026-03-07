@@ -36,6 +36,9 @@ _VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}
 # Characters to strip when normalizing titles for dedup comparison
 _RE_NON_ALNUM = re.compile(r"[^a-z0-9 ]+")
 _RE_MULTI_SPACE = re.compile(r"\s+")
+# Connectors that should be treated as equivalent ("und", "and", "&", "+")
+# Uses word boundaries so we don't break words like "wunderbar" or "andi"
+_RE_CONNECTORS = re.compile(r"\b(?:und|and)\b")
 # Some scrapers append the city name to the title (e.g. "Vivid Indie Bielefeld")
 _RE_CITY_SUFFIX = re.compile(r"\s+bielefeld$")
 
@@ -50,6 +53,11 @@ def _normalize_title(title: str) -> str:
     # Normalize unicode (e.g. ä -> a for comparison purposes)
     t = unicodedata.normalize("NFKD", t)
     t = "".join(c for c in t if not unicodedata.combining(c))
+    # Replace "&" and "+" with "und" before stripping non-alnum chars,
+    # so that "beats & butterkeks" and "beats und butterkeks" both match.
+    t = t.replace("&", " und ").replace("+", " und ")
+    # Remove connectors ("und", "and") so they don't affect matching
+    t = _RE_CONNECTORS.sub(" ", t)
     t = _RE_NON_ALNUM.sub(" ", t)
     t = _RE_MULTI_SPACE.sub(" ", t).strip()
     # Strip trailing city name that some scrapers append to the title
