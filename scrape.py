@@ -24,6 +24,7 @@ from scrapers.forum_bielefeld import ForumBielefeldScraper
 from scrapers.lenkwerk import LenkwerkScraper
 from scrapers.stadthalle_bielefeld import StadthalleBielefeldScraper
 from scrapers.stereo import StereoScraper
+from scrapers.verl import VerlScraper
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,6 +50,7 @@ SCRAPERS = [
     StadthalleBielefeldScraper,
     ForumBielefeldScraper,
     LenkwerkScraper,
+    VerlScraper,
 ]
 
 
