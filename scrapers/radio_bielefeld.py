@@ -60,7 +60,7 @@ class RadioBielefeldScraper(BaseScraper):
         base_data = {
             "ajaxConfig[SENDERID]": str(_SENDER_ID),
             "ajaxConfig[senderId]": str(_SENDER_ID),
-            "ajaxConfig[EVENTS_PER_PAGE]": "10",
+            "ajaxConfig[EVENTS_PER_PAGE]": "200",
             "ajaxConfig[URL]": (
                 "https://vtipps.amstools.de/calendar/index.php?s=event_single_serv"
             ),
@@ -93,7 +93,7 @@ class RadioBielefeldScraper(BaseScraper):
             "action": "getList",
             "vars[fromurl]": _BASE_PAGE,
             "vars[backlink]": _BACKLINK,
-            "vars[maxNews]": "100",
+            "vars[maxNews]": "200",
             "vars[isPlugin]": "1",
         })
 
