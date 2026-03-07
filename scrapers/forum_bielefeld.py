@@ -25,6 +25,7 @@ MONTH_MAP = {
 
 RE_BG_IMAGE = re.compile(r"background-image:\s*url\(['\"]?(.+?)['\"]?\)")
 RE_TIME = re.compile(r"(\d{1,2}):(\d{2})\s*Uhr", re.IGNORECASE)
+RE_TIME_FIRST = re.compile(r"(\d{1,2}):(\d{2})")  # captures first HH:MM (start of range)
 RE_PRICE = re.compile(r"Eintritt:\s*(.+)", re.IGNORECASE)
 
 
@@ -191,11 +192,16 @@ class ForumBielefeldScraper(BaseScraper):
                 if date_parsed:
                     date_start = date_parsed
 
-                # Start time (first "HH:MM Uhr" that is NOT the Einlass line)
+                # Start time: find first div containing "Uhr" but not "Einlass".
+                # Use RE_TIME_FIRST to capture the first HH:MM in the div so that
+                # ranges like "22:00 – 05:00 Uhr" yield the start time (22:00),
+                # not the end time (05:00) which RE_TIME would find instead.
                 for div_text in divs:
-                    if div_text.lower().startswith("einlass"):
+                    if "einlass" in div_text.lower():
                         continue
-                    m_time = RE_TIME.search(div_text)
+                    if "uhr" not in div_text.lower():
+                        continue
+                    m_time = RE_TIME_FIRST.search(div_text)
                     if m_time:
                         date_start = date_start.replace(
                             hour=int(m_time.group(1)),
