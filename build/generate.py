@@ -9,6 +9,7 @@ import shutil
 import sys
 import unicodedata
 import urllib.parse
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import requests
@@ -41,6 +42,11 @@ _RE_MULTI_SPACE = re.compile(r"\s+")
 _RE_CONNECTORS = re.compile(r"\b(?:und|and)\b")
 # Some scrapers append the city name to the title (e.g. "Vivid Indie Bielefeld")
 _RE_CITY_SUFFIX = re.compile(r"\s+bielefeld$")
+
+# Minimum similarity ratio (0..1) for fuzzy title matching.  Two events on the
+# same day whose normalised titles have a SequenceMatcher ratio >= this value
+# are considered duplicates even if they don't match exactly.
+_FUZZY_THRESHOLD = 0.82
 
 
 def _normalize_title(title: str) -> str:
@@ -77,17 +83,44 @@ def _source_sort_key(ev: dict) -> int:
     return _SOURCE_PRIORITY.get(ev.get("source", ""), 0)
 
 
+def _merge_group(group: list[dict]) -> dict:
+    """Merge a group of duplicate events into a single result dict."""
+    group = sorted(group, key=_source_sort_key)
+    primary = group[0]
+    result = dict(primary)
+
+    result["sources"] = [
+        {"source": e["source"], "url": e.get("url", "")}
+        for e in group
+    ]
+    result["source"] = primary["source"]
+
+    # Prefer the longest / most complete description
+    best_desc = max(group, key=lambda e: len(e.get("description") or ""))
+    result["description"] = best_desc.get("description", "")
+
+    # Prefer non-empty values for optional fields
+    for field in ("image_url", "location", "category", "price"):
+        result[field] = next(
+            (e[field] for e in group if e.get(field)), ""
+        )
+
+    return result
+
+
 def deduplicate_events(events: list[dict]) -> list[dict]:
     """Merge events that appear on multiple sources into single entries.
 
-    Groups events by normalised title + date (day only).  For each group the
-    best available information is picked and all sources are collected in a
-    ``sources`` list (each entry has ``source`` and ``url``).
+    Two-pass approach:
+    1. **Exact match** – group by normalised title + date (day).
+    2. **Fuzzy match** – within the same day, merge groups whose normalised
+       titles have a SequenceMatcher ratio >= ``_FUZZY_THRESHOLD``.
 
-    Within each group events are sorted by source priority so that preferred
-    sources (venue pages, Kulturamt, …) are picked over aggregators like
-    nw.de or bielefeld-jetzt.de.
+    This catches minor spelling differences, extra words, or abbreviations
+    that survive normalisation.
     """
+
+    # --- Pass 1: exact grouping by (normalised title, date) ----------------
     groups: dict[tuple[str, str], list[dict]] = {}
     for ev in events:
         norm_title = _normalize_title(ev.get("title", ""))
@@ -95,58 +128,47 @@ def deduplicate_events(events: list[dict]) -> list[dict]:
         key = (norm_title, date_day)
         groups.setdefault(key, []).append(ev)
 
+    # --- Pass 2: fuzzy-merge groups that share the same day ----------------
+    # Organise groups by date so we only compare titles within the same day.
+    by_date: dict[str, list[tuple[str, list[dict]]]] = {}
+    for (norm_title, date_day), group in groups.items():
+        by_date.setdefault(date_day, []).append((norm_title, group))
+
     merged: list[dict] = []
     dedup_count = 0
-    for _key, group in groups.items():
-        # Sort by source priority so the most trusted source comes first
-        group = sorted(group, key=_source_sort_key)
 
-        if len(group) == 1:
-            ev = group[0]
-            ev["sources"] = [{"source": ev["source"], "url": ev.get("url", "")}]
-            merged.append(ev)
-            continue
+    for date_day, title_groups in by_date.items():
+        # Union-Find style merging: greedily merge similar titles
+        merged_flags = [False] * len(title_groups)
+        for i in range(len(title_groups)):
+            if merged_flags[i]:
+                continue
+            combined = list(title_groups[i][1])  # start with this group
+            title_i = title_groups[i][0]
+            for j in range(i + 1, len(title_groups)):
+                if merged_flags[j]:
+                    continue
+                title_j = title_groups[j][0]
+                ratio = SequenceMatcher(None, title_i, title_j).ratio()
+                if ratio >= _FUZZY_THRESHOLD:
+                    combined.extend(title_groups[j][1])
+                    merged_flags[j] = True
+                    logger.info(
+                        "Fuzzy-matched (%.0f%%): %r  <->  %r",
+                        ratio * 100,
+                        title_i,
+                        title_j,
+                    )
 
-        dedup_count += len(group) - 1
-
-        # Pick the "best" value for each field across all duplicates
-        primary = group[0]
-        result = dict(primary)
-
-        # Collect all sources
-        result["sources"] = [
-            {"source": e["source"], "url": e.get("url", "")}
-            for e in group
-        ]
-
-        # Keep the primary source for gradient colours etc.
-        result["source"] = group[0]["source"]
-
-        # Prefer the longest / most complete description
-        best_desc = max(group, key=lambda e: len(e.get("description") or ""))
-        result["description"] = best_desc.get("description", "")
-
-        # Prefer a non-empty image
-        result["image_url"] = next(
-            (e["image_url"] for e in group if e.get("image_url")), ""
-        )
-
-        # Prefer a non-empty location
-        result["location"] = next(
-            (e["location"] for e in group if e.get("location")), ""
-        )
-
-        # Prefer a non-empty category
-        result["category"] = next(
-            (e["category"] for e in group if e.get("category")), ""
-        )
-
-        # Prefer a non-empty price
-        result["price"] = next(
-            (e["price"] for e in group if e.get("price")), ""
-        )
-
-        merged.append(result)
+            if len(combined) == 1:
+                ev = combined[0]
+                ev["sources"] = [
+                    {"source": ev["source"], "url": ev.get("url", "")}
+                ]
+                merged.append(ev)
+            else:
+                dedup_count += len(combined) - 1
+                merged.append(_merge_group(combined))
 
     # Sort again by date after merging
     merged.sort(key=lambda e: e.get("date_start", ""))
