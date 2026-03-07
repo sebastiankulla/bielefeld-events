@@ -23,6 +23,7 @@ from scrapers.prime import PrimeScraper
 from scrapers.forum_bielefeld import ForumBielefeldScraper
 from scrapers.lenkwerk import LenkwerkScraper
 from scrapers.movie_bielefeld import MovieBielefeldScraper
+from scrapers.radio_bielefeld import RadioBielefeldScraper
 from scrapers.stadthalle_bielefeld import StadthalleBielefeldScraper
 from scrapers.stereo import StereoScraper
 from scrapers.verl import VerlScraper
@@ -52,6 +53,7 @@ SCRAPERS = [
     ForumBielefeldScraper,
     LenkwerkScraper,
     MovieBielefeldScraper,
+    RadioBielefeldScraper,
     VerlScraper,
 ]
 
