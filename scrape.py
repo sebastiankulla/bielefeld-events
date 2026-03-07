@@ -7,6 +7,7 @@ import time
 
 from build.generate import main as generate_site
 from scrapers.bielefeld_jetzt import BielefeldJetztScraper
+from scrapers.guetersloh import GueterslohScraper
 from scrapers.irish_pub import IrishPubScraper
 from scrapers.jazzclub import JazzclubScraper
 from scrapers.bunker_ulmenwall import BunkerUlmenwallScraper
@@ -32,6 +33,7 @@ logger = logging.getLogger("scrape")
 
 SCRAPERS = [
     BielefeldJetztScraper,
+    GueterslohScraper,
     KulturamtScraper,
     OwlJournalScraper,
     StereoScraper,
