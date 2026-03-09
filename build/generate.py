@@ -83,6 +83,15 @@ def _source_sort_key(ev: dict) -> int:
     return _SOURCE_PRIORITY.get(ev.get("source", ""), 0)
 
 
+def _has_real_time(date_str: str) -> bool:
+    """Return True when date_str contains a time component that is not 00:00."""
+    # ISO format stored by SQLite: "2026-03-10T19:30:00" or "2026-03-10 19:30:00"
+    if len(date_str) <= 10:
+        return False
+    time_part = date_str[10:]
+    return not re.search(r"[T ]00:00", time_part)
+
+
 def _merge_group(group: list[dict]) -> dict:
     """Merge a group of duplicate events into a single result dict."""
     group = sorted(group, key=_source_sort_key)
@@ -94,6 +103,14 @@ def _merge_group(group: list[dict]) -> dict:
         for e in group
     ]
     result["source"] = primary["source"]
+
+    # Prefer date_start that carries a real time over midnight (00:00).
+    # Some scrapers (e.g. Lokschuppen) only know the date, not the time.
+    best_date_ev = next(
+        (e for e in group if _has_real_time(e.get("date_start") or "")),
+        group[0],
+    )
+    result["date_start"] = best_date_ev["date_start"]
 
     # Prefer the longest / most complete description
     best_desc = max(group, key=lambda e: len(e.get("description") or ""))
@@ -108,16 +125,65 @@ def _merge_group(group: list[dict]) -> dict:
     return result
 
 
+def _is_title_match(title_i: str, title_j: str) -> bool:
+    """Return True if two normalised titles should be treated as duplicates.
+
+    Matches when any of the following hold:
+
+    1. SequenceMatcher ratio >= ``_FUZZY_THRESHOLD`` (catches minor typos /
+       spelling differences).
+    2. The shorter title is a **word-boundary prefix** of the longer one and
+       covers >= 50 % of its length.  Catches "Mord am Mittwoch" vs
+       "Mord am Mittwoch – Krimidinnershow" (subtitle appended).
+    3. The shorter title is a **verbatim substring** of the longer one, the
+       shorter title is >= 12 chars, and it covers >= 35 % of the longer
+       title's length.  Catches "Mord am Mittwoch" inside
+       "Lucia Leona: Mord am Mittwoch - Die Crime Show" where a performer
+       name is prepended before the actual event title.
+    """
+    ratio = SequenceMatcher(None, title_i, title_j).ratio()
+    if ratio >= _FUZZY_THRESHOLD:
+        return True
+
+    if title_i and title_j:
+        shorter, longer = (
+            (title_i, title_j) if len(title_i) <= len(title_j)
+            else (title_j, title_i)
+        )
+        length_ratio = len(shorter) / len(longer)
+
+        # Rule 2: word-boundary prefix match
+        if (
+            len(shorter) >= 8
+            and length_ratio >= 0.5
+            and (longer.startswith(shorter + " ") or longer == shorter)
+        ):
+            logger.info("Prefix-matched: %r  <->  %r", shorter, longer)
+            return True
+
+        # Rule 3: substring match (e.g. performer name prepended)
+        if (
+            len(shorter) >= 12
+            and length_ratio >= 0.35
+            and shorter in longer
+        ):
+            logger.info("Substring-matched: %r  <->  %r", shorter, longer)
+            return True
+
+    return False
+
+
 def deduplicate_events(events: list[dict]) -> list[dict]:
     """Merge events that appear on multiple sources into single entries.
 
     Two-pass approach:
     1. **Exact match** – group by normalised title + date (day).
     2. **Fuzzy match** – within the same day, merge groups whose normalised
-       titles have a SequenceMatcher ratio >= ``_FUZZY_THRESHOLD``.
+       titles have a SequenceMatcher ratio >= ``_FUZZY_THRESHOLD`` *or*
+       where the shorter title is a word-boundary prefix of the longer one.
 
-    This catches minor spelling differences, extra words, or abbreviations
-    that survive normalisation.
+    This catches minor spelling differences, extra words, subtitles, or
+    abbreviations that survive normalisation.
     """
 
     # --- Pass 1: exact grouping by (normalised title, date) ----------------
@@ -138,6 +204,13 @@ def deduplicate_events(events: list[dict]) -> list[dict]:
     dedup_count = 0
 
     for date_day, title_groups in by_date.items():
+        # Sort groups shortest-title-first so that a bare core title (e.g.
+        # "Mord am Mittwoch") is always processed before decorated variants
+        # ("Mord am Mittwoch – Krimishow", "Lucia Leona: Mord am Mittwoch …").
+        # This ensures the short core title matches all variants in one pass,
+        # avoiding transitivity failures in the greedy algorithm.
+        title_groups = sorted(title_groups, key=lambda x: len(x[0]))
+
         # Union-Find style merging: greedily merge similar titles
         merged_flags = [False] * len(title_groups)
         for i in range(len(title_groups)):
@@ -149,10 +222,10 @@ def deduplicate_events(events: list[dict]) -> list[dict]:
                 if merged_flags[j]:
                     continue
                 title_j = title_groups[j][0]
-                ratio = SequenceMatcher(None, title_i, title_j).ratio()
-                if ratio >= _FUZZY_THRESHOLD:
+                if _is_title_match(title_i, title_j):
                     combined.extend(title_groups[j][1])
                     merged_flags[j] = True
+                    ratio = SequenceMatcher(None, title_i, title_j).ratio()
                     logger.info(
                         "Fuzzy-matched (%.0f%%): %r  <->  %r",
                         ratio * 100,

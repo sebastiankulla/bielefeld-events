@@ -2,6 +2,8 @@
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
 from bs4 import BeautifulSoup, Tag
 
@@ -50,8 +52,46 @@ class LokschuppenScraper(BaseScraper):
                     "Failed to scrape %s/veranstaltungen/", self.base_url,
                 )
 
+        # Enrich each event with the start time from its detail page.
+        # The listing page only shows the date (DD.MM.YYYY) without a time;
+        # the time ("Beginn: HH.MM Uhr") is only available on the detail page.
+        if events:
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                events = list(executor.map(self._enrich_with_time, events))
+
         self.logger.info("Scraped %d events from %s", len(events), self.name)
         return events
+
+    # --- Regex to extract the show-start time from a detail page -----------
+    _RE_TIME = re.compile(
+        r"(?:Beginn|Show|Veranstaltungsbeginn)\s*[:\s]+(\d{1,2})[:\.](\d{2})\s*Uhr",
+        re.IGNORECASE,
+    )
+    # Fallback: door-open time when no show-start is present
+    _RE_EINLASS = re.compile(
+        r"Einlass\s*[:\s]+(\d{1,2})[:\.](\d{2})\s*Uhr",
+        re.IGNORECASE,
+    )
+
+    def _enrich_with_time(self, event: Event) -> Event:
+        """Fetch the event detail page and update date_start with the start time."""
+        if not event.url:
+            return event
+        try:
+            html = self._get_page(event.url)
+            soup = BeautifulSoup(html, "lxml")
+            text = soup.get_text(separator="\n")
+            for pattern in (self._RE_TIME, self._RE_EINLASS):
+                m = pattern.search(text)
+                if m:
+                    hour, minute = int(m.group(1)), int(m.group(2))
+                    return replace(
+                        event,
+                        date_start=event.date_start.replace(hour=hour, minute=minute),
+                    )
+        except Exception:
+            self.logger.debug("Could not enrich time from %s", event.url)
+        return event
 
     def _extract_event_divs(self, soup: BeautifulSoup) -> list[Event]:
         """Extract events from the custom div.event containers."""
