@@ -128,13 +128,18 @@ def _merge_group(group: list[dict]) -> dict:
 def _is_title_match(title_i: str, title_j: str) -> bool:
     """Return True if two normalised titles should be treated as duplicates.
 
-    Matches when:
-    1. SequenceMatcher ratio >= ``_FUZZY_THRESHOLD``, **or**
-    2. The shorter title is a word-boundary prefix of the longer one and
-       covers at least half its length.  This catches cases like
-       "Mord am Mittwoch" vs "Mord am Mittwoch – Krimidinnershow" where
-       one source provides only the bare title and another appends a
-       subtitle, making the fuzzy ratio fall below the threshold.
+    Matches when any of the following hold:
+
+    1. SequenceMatcher ratio >= ``_FUZZY_THRESHOLD`` (catches minor typos /
+       spelling differences).
+    2. The shorter title is a **word-boundary prefix** of the longer one and
+       covers >= 50 % of its length.  Catches "Mord am Mittwoch" vs
+       "Mord am Mittwoch – Krimidinnershow" (subtitle appended).
+    3. The shorter title is a **verbatim substring** of the longer one, the
+       shorter title is >= 12 chars, and it covers >= 35 % of the longer
+       title's length.  Catches "Mord am Mittwoch" inside
+       "Lucia Leona: Mord am Mittwoch - Die Crime Show" where a performer
+       name is prepended before the actual event title.
     """
     ratio = SequenceMatcher(None, title_i, title_j).ratio()
     if ratio >= _FUZZY_THRESHOLD:
@@ -145,18 +150,24 @@ def _is_title_match(title_i: str, title_j: str) -> bool:
             (title_i, title_j) if len(title_i) <= len(title_j)
             else (title_j, title_i)
         )
-        # Require the shorter title to be at least 8 chars (avoid single-word
-        # false positives) and cover >= 50 % of the longer title's length.
+        length_ratio = len(shorter) / len(longer)
+
+        # Rule 2: word-boundary prefix match
         if (
             len(shorter) >= 8
-            and len(shorter) / len(longer) >= 0.5
+            and length_ratio >= 0.5
             and (longer.startswith(shorter + " ") or longer == shorter)
         ):
-            logger.info(
-                "Prefix-matched: %r  <->  %r",
-                shorter,
-                longer,
-            )
+            logger.info("Prefix-matched: %r  <->  %r", shorter, longer)
+            return True
+
+        # Rule 3: substring match (e.g. performer name prepended)
+        if (
+            len(shorter) >= 12
+            and length_ratio >= 0.35
+            and shorter in longer
+        ):
+            logger.info("Substring-matched: %r  <->  %r", shorter, longer)
             return True
 
     return False
@@ -193,6 +204,13 @@ def deduplicate_events(events: list[dict]) -> list[dict]:
     dedup_count = 0
 
     for date_day, title_groups in by_date.items():
+        # Sort groups shortest-title-first so that a bare core title (e.g.
+        # "Mord am Mittwoch") is always processed before decorated variants
+        # ("Mord am Mittwoch – Krimishow", "Lucia Leona: Mord am Mittwoch …").
+        # This ensures the short core title matches all variants in one pass,
+        # avoiding transitivity failures in the greedy algorithm.
+        title_groups = sorted(title_groups, key=lambda x: len(x[0]))
+
         # Union-Find style merging: greedily merge similar titles
         merged_flags = [False] * len(title_groups)
         for i in range(len(title_groups)):
