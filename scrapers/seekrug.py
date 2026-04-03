@@ -1,11 +1,30 @@
 """Scraper for Seekrug am Obersee event listings."""
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from bs4 import BeautifulSoup
 
 from scrapers.base import BaseScraper, Event, parse_german_date
+
+# Number of weeks to generate for recurring weekday events like "jeden Montag"
+_RECURRING_WEEKS = 8
+
+# Weekday name → weekday index (Monday=0)
+_WEEKDAY_MAP = {
+    "montag": 0, "dienstag": 1, "mittwoch": 2, "donnerstag": 3,
+    "freitag": 4, "samstag": 5, "sonntag": 6,
+}
+_RE_JEDEN = re.compile(
+    r"jeden\s+(" + "|".join(_WEEKDAY_MAP) + r")", re.IGNORECASE
+)
+
+
+def _next_weekday(weekday: int) -> datetime:
+    """Return today or the next upcoming date for the given weekday (0=Mon)."""
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    days_ahead = (weekday - today.weekday()) % 7
+    return today + timedelta(days=days_ahead)
 
 # Matches "DD.MM.YY" with a 2-digit year, e.g. "31.01.26"
 _RE_SHORT_YEAR = re.compile(r"(\d{1,2})\.(\d{1,2})\.(\d{2})(?!\d)")
@@ -101,34 +120,22 @@ class SeekrugScraper(BaseScraper):
         seen: set[tuple] = set()
 
         for card in soup.select("div.tmb"):
-            event = self._parse_card(card)
-            if event is None:
-                continue
-            key = (event.title, event.date_start.date())
-            if key not in seen:
-                seen.add(key)
-                events.append(event)
+            for event in self._parse_card(card):
+                key = (event.title, event.date_start.date())
+                if key not in seen:
+                    seen.add(key)
+                    events.append(event)
 
         return events
 
-    def _parse_card(self, card) -> Event | None:
-        # Date
-        date_el = card.select_one("div.t-entry-cf-detail-195899")
-        if not date_el:
-            return None
-        date_text = date_el.get_text(strip=True)
-        date_start = _parse_seekrug_date(date_text)
-        if date_start is None:
-            self.logger.debug("Could not parse date: %r", date_text)
-            return None
-
-        # Title + URL
+    def _parse_card(self, card) -> list[Event]:
+        # Title + URL (needed for all branches)
         title_el = card.select_one("h3.t-entry-title a")
         if not title_el:
-            return None
+            return []
         title = title_el.get_text(strip=True)
         if not title:
-            return None
+            return []
         url = self._absolute_url(title_el.get("href", "")) or self.EVENTS_URL
 
         # Image – prefer data-guid (full-size) over src (thumbnail)
@@ -137,7 +144,36 @@ class SeekrugScraper(BaseScraper):
         if img_el:
             image_url = img_el.get("data-guid", "") or img_el.get("src", "")
 
-        return Event(
+        date_el = card.select_one("div.t-entry-cf-detail-195899")
+        if not date_el:
+            return []
+        date_text = date_el.get_text(strip=True)
+
+        # Recurring weekday pattern: "jeden Montag …"
+        m = _RE_JEDEN.search(date_text)
+        if m:
+            weekday = _WEEKDAY_MAP[m.group(1).lower()]
+            first = _next_weekday(weekday)
+            return [
+                Event(
+                    title=title,
+                    date_start=first + timedelta(weeks=i),
+                    source=self.name,
+                    url=url,
+                    location=self.LOCATION,
+                    image_url=image_url,
+                    category="Veranstaltung",
+                )
+                for i in range(_RECURRING_WEEKS)
+            ]
+
+        # Single date
+        date_start = _parse_seekrug_date(date_text)
+        if date_start is None:
+            self.logger.debug("Could not parse date: %r", date_text)
+            return []
+
+        return [Event(
             title=title,
             date_start=date_start,
             source=self.name,
@@ -145,4 +181,4 @@ class SeekrugScraper(BaseScraper):
             location=self.LOCATION,
             image_url=image_url,
             category="Veranstaltung",
-        )
+        )]
