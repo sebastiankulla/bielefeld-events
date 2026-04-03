@@ -1,8 +1,59 @@
 """Scraper for Seekrug am Obersee event listings."""
 
+import re
+from datetime import datetime
+
 from bs4 import BeautifulSoup
 
 from scrapers.base import BaseScraper, Event, parse_german_date
+
+# Matches "DD.MM.YY" with a 2-digit year, e.g. "31.01.26"
+_RE_SHORT_YEAR = re.compile(r"(\d{1,2})\.(\d{1,2})\.(\d{2})(?!\d)")
+
+# Matches "DD.MM." without a year, e.g. "02.04." or "29.03."
+_RE_NO_YEAR = re.compile(r"(\d{1,2})\.(\d{1,2})\.")
+
+
+def _parse_seekrug_date(text: str) -> datetime | None:
+    """Extended date parser that handles Seekrug-specific quirks.
+
+    On top of the standard ``parse_german_date`` it handles:
+
+    * 2-digit years: "31.01.26" → 2026-01-31
+    * Missing year:  "02.04. ab 19 Uhr" → uses current or next year
+    """
+    if not text:
+        return None
+
+    # 1. Normalise 2-digit year ("31.01.26" → "31.01.2026") before passing
+    #    to the generic parser so all its patterns still apply.
+    normalised = _RE_SHORT_YEAR.sub(
+        lambda m: f"{m.group(1)}.{m.group(2)}.20{m.group(3)}", text
+    )
+    result = parse_german_date(normalised)
+    if result:
+        return result
+
+    # 2. Try "DD.MM." without a year – pick the first match and assume the
+    #    nearest future occurrence (current year, or next year if past).
+    m = _RE_NO_YEAR.search(text)
+    if m:
+        day, month = int(m.group(1)), int(m.group(2))
+        now = datetime.now()
+        year = now.year
+        try:
+            candidate = datetime(year, month, day)
+        except ValueError:
+            return None
+        # If the date has already passed this year, try next year
+        if candidate.date() < now.date():
+            try:
+                candidate = datetime(year + 1, month, day)
+            except ValueError:
+                return None
+        return candidate
+
+    return None
 
 
 class SeekrugScraper(BaseScraper):
@@ -10,10 +61,22 @@ class SeekrugScraper(BaseScraper):
 
     The /aktuelles/ page renders events as ``div.tmb`` cards, each containing:
 
-    * ``div.t-entry-cf-detail-195899``: Date text (e.g. "30.04.2026" or
-      "Ostersonntag, 05.04.2026")
+    * ``div.t-entry-cf-detail-195899``: Date text in various formats
     * ``h3.t-entry-title a``: Event title and link to the individual page
-    * ``img.adaptive-async``: Thumbnail image (``data-guid`` holds the full URL)
+    * ``img.adaptive-async``: Thumbnail (``data-guid`` holds the full-size URL)
+
+    Date formats encountered on the page:
+
+    * "30.04.2026" – standard numeric
+    * "Ostersonntag, 05.04.2026" – weekday prefix with full year
+    * "Gründonnerstag, 02.04. ab 19 Uhr" – weekday prefix, no year
+    * "So 29.03./ von 09.30-12 Uhr" – abbreviation prefix, no year
+    * "ab dem 03.04. und über Ostern" – prose with partial date
+    * "02./15. ab 17h, am 10.05. ab 12h" – multiple dates, take first
+    * "Samstag, 31.01.26" – 2-digit year
+    * "19.07.25" – 2-digit year
+    * "jeden Montag im SEEKRUG" – no parseable date → skipped
+    * "OSTERN im SEEKRUG" – no parseable date → skipped
     """
 
     name = "seekrug"
@@ -54,8 +117,9 @@ class SeekrugScraper(BaseScraper):
         if not date_el:
             return None
         date_text = date_el.get_text(strip=True)
-        date_start = parse_german_date(date_text)
+        date_start = _parse_seekrug_date(date_text)
         if date_start is None:
+            self.logger.debug("Could not parse date: %r", date_text)
             return None
 
         # Title + URL
