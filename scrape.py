@@ -26,6 +26,7 @@ from scrapers.movie_bielefeld import MovieBielefeldScraper
 from scrapers.radio_bielefeld import RadioBielefeldScraper
 from scrapers.stadthalle_bielefeld import StadthalleBielefeldScraper
 from scrapers.stereo import StereoScraper
+from scrapers.seekrug import SeekrugScraper
 from scrapers.verl import VerlScraper
 
 logging.basicConfig(
@@ -54,6 +55,7 @@ SCRAPERS = [
     LenkwerkScraper,
     MovieBielefeldScraper,
     RadioBielefeldScraper,
+    SeekrugScraper,
     VerlScraper,
 ]
 
