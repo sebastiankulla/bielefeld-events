@@ -8,16 +8,20 @@ Get a token at: https://www.eventbrite.com/platform/api-keys
 """
 
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 from scrapers.base import BaseScraper, Event
 
 API_BASE = "https://www.eventbriteapi.com/v3"
-PAGE_SIZE = 50
 
-# Eventbrite place ID for Bielefeld, Germany (used as fallback query)
-_LOCATION_ADDRESS = "Bielefeld, Germany"
-_LOCATION_WITHIN = "10km"
+# Bounding box around Bielefeld (approx. 15 km radius)
+_BBOX = {
+    "top": 52.12,
+    "bottom": 51.90,
+    "left": 8.30,
+    "right": 8.75,
+}
 
 
 class EventbriteScraper(BaseScraper):
@@ -36,96 +40,173 @@ class EventbriteScraper(BaseScraper):
             return []
 
         self.session.headers["Authorization"] = f"Bearer {token}"
+        # Override Accept so the API returns JSON instead of HTML (the
+        # browser-like User-Agent from BaseScraper would otherwise trigger
+        # the WAF to serve an HTML CAPTCHA page).
+        self.session.headers["Accept"] = "application/json"
 
         today = datetime.now()
         end_date = today + timedelta(days=30)
 
-        events: list[Event] = []
-        page = 1
+        raw = self._search_all(today.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
+        self.logger.info("Found %d raw events from destination/search", len(raw))
+
+        events = self._enrich_all(raw)
+        self.logger.info("Scraped %d events from %s", len(events), self.name)
+        return events
+
+    # ------------------------------------------------------------------ search
+
+    def _search_all(self, start_date: str, end_date: str) -> list[dict]:
+        """Return all search result dicts for the date range using continuation pagination."""
+        results: list[dict] = []
+        continuation: str | None = None
+
         while True:
-            params = {
-                "location.address": _LOCATION_ADDRESS,
-                "location.within": _LOCATION_WITHIN,
-                "start_date.range_start": today.strftime("%Y-%m-%dT00:00:00Z"),
-                "start_date.range_end": end_date.strftime("%Y-%m-%dT23:59:59Z"),
-                "expand": "venue,category,logo,ticket_availability",
-                "page": page,
-                "page_size": PAGE_SIZE,
+            event_search: dict = {
+                "q": "",
+                "dedup": True,
+                "page_size": 50,
+                "bbox": _BBOX,
+                "date_range": {"from": start_date, "to": end_date},
             }
+            if continuation:
+                event_search["continuation"] = continuation
+
             try:
-                resp = self.session.get(
+                resp = self.session.post(
                     f"{API_BASE}/destination/search/",
-                    params=params,
+                    json={"locale": "de_DE", "event_search": event_search},
                     timeout=30,
                 )
                 resp.raise_for_status()
                 data = resp.json()
             except Exception:
-                self.logger.exception("Failed to fetch Eventbrite page %d", page)
+                self.logger.exception("destination/search request failed")
                 break
 
-            raw_events = data.get("events") or []
-            for item in raw_events:
-                event = self._parse_event(item)
-                if event:
-                    events.append(event)
+            events_block = data.get("events") or {}
+            results.extend(events_block.get("results") or [])
 
-            pagination = data.get("pagination") or {}
-            if not pagination.get("has_more_items"):
+            pagination = events_block.get("pagination") or {}
+            continuation = pagination.get("continuation") or None
+            if not continuation:
                 break
-            page += 1
 
-        self.logger.info("Scraped %d events from %s", len(events), self.name)
+        return results
+
+    # ----------------------------------------------------------------- enrich
+
+    def _enrich_all(self, raw: list[dict]) -> list[Event]:
+        """Fetch full event details in parallel and build Event objects."""
+        events: list[Event] = []
+
+        def fetch_and_parse(item: dict) -> Event | None:
+            event_id = item.get("eventbrite_event_id") or item.get("eid")
+            if not event_id:
+                return None
+            try:
+                resp = self.session.get(
+                    f"{API_BASE}/events/{event_id}/",
+                    params={"expand": "logo,venue,ticket_availability"},
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                full = resp.json()
+            except Exception:
+                self.logger.warning("Could not fetch event %s – using search data", event_id)
+                full = {}
+            return self._parse(item, full)
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(fetch_and_parse, item): item for item in raw}
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    events.append(result)
+
         return events
 
-    def _parse_event(self, item: dict) -> Event | None:
+    # ------------------------------------------------------------------ parse
+
+    def _parse(self, search_item: dict, full: dict) -> Event | None:
         # Title
-        title = (item.get("name") or {}).get("text", "").strip()
+        title = (
+            (full.get("name") or {}).get("text", "").strip()
+            or search_item.get("name", "").strip()
+        )
         if not title:
             return None
 
-        # Start date (use local time so we don't need tz conversion)
-        start = item.get("start") or {}
-        date_start = self._parse_iso(start.get("local", ""))
+        # Dates – prefer full event's start/end (already combined datetime)
+        date_start = self._iso(
+            (full.get("start") or {}).get("local")
+            or f"{search_item.get('start_date', '')}T{search_item.get('start_time', '00:00')}"
+        )
         if not date_start:
             return None
 
-        # End date
-        end = item.get("end") or {}
-        date_end = self._parse_iso(end.get("local", ""))
+        date_end = self._iso(
+            (full.get("end") or {}).get("local")
+            or (
+                f"{search_item['end_date']}T{search_item.get('end_time', '00:00')}"
+                if search_item.get("end_date")
+                else None
+            )
+        )
 
-        url = item.get("url", "")
+        url = full.get("url") or search_item.get("url", "")
 
-        # Description (plain text)
-        description = (item.get("description") or {}).get("text", "")
+        # Description: full text first, fall back to summary
+        description = (
+            (full.get("description") or {}).get("text", "")
+            or search_item.get("summary", "")
+            or (full.get("summary") or "")
+        )
 
-        # Image – prefer the full-size original logo
-        logo = item.get("logo") or {}
+        # Image
+        logo = full.get("logo") or {}
         image_url = (
             (logo.get("original") or {}).get("url", "")
             or logo.get("url", "")
         )
 
-        # Venue / location
-        venue = item.get("venue") or {}
+        # Venue
+        venue = full.get("venue") or {}
         venue_name = venue.get("name", "")
         address = venue.get("address") or {}
-        city = address.get("city", "Bielefeld")
+        city = address.get("city", "")
         street = address.get("address_1", "")
         if venue_name and street:
             location = f"{venue_name}, {street}"
         else:
             location = venue_name or street
 
-        # Category
-        category = (item.get("category") or {}).get("name", "")
+        # City fallback from search locations list
+        if not city:
+            for loc in (search_item.get("locations") or []):
+                if loc.get("type") == "locality":
+                    city = loc.get("name", "")
+                    break
+        if not city:
+            city = "Bielefeld"
+
+        # Category from EventbriteCategory tag (prefer German display_name)
+        category = ""
+        for tag in (search_item.get("tags") or []):
+            if tag.get("prefix") == "EventbriteCategory":
+                category = (
+                    (tag.get("localized") or {}).get("display_name")
+                    or tag.get("display_name", "")
+                )
+                break
 
         # Price
-        if item.get("is_free"):
+        if full.get("is_free"):
             price = "Kostenlos"
         else:
-            ticket_avail = item.get("ticket_availability") or {}
-            min_ticket = ticket_avail.get("minimum_ticket_price") or {}
+            ticket_avail = full.get("ticket_availability") or {}
+            min_ticket = (ticket_avail.get("minimum_ticket_price") or {})
             price = min_ticket.get("display", "")
 
         return Event(
@@ -142,13 +223,20 @@ class EventbriteScraper(BaseScraper):
             price=price,
         )
 
+    # ---------------------------------------------------------------- helpers
+
     @staticmethod
-    def _parse_iso(date_str: str) -> datetime | None:
+    def _iso(date_str: str | None) -> datetime | None:
         if not date_str:
             return None
-        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d"):
+        # Slice to the exact character length each format expects.
+        for fmt, length in (
+            ("%Y-%m-%dT%H:%M:%S", 19),
+            ("%Y-%m-%dT%H:%M", 16),
+            ("%Y-%m-%d", 10),
+        ):
             try:
-                return datetime.strptime(date_str[:19], fmt)
+                return datetime.strptime(date_str[:length], fmt)
             except ValueError:
                 continue
         return None
