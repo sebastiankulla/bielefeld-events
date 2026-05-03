@@ -36,6 +36,8 @@ jobs:
       - name: Run scrapers
         run: python scrape.py
         continue-on-error: true
+        env:
+          EVENTBRITE_TOKEN: ${{ secrets.EVENTBRITE_TOKEN }}
 
       - name: Generate static site
         run: python build/generate.py
